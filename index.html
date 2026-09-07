@@ -4,9 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0C0E0D">
-<title>Almacén · MS Universe</title>
+<title>Activos · MS Universe</title>
 <link rel="manifest" href="manifest.json">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<!-- Lector de QR para navegadores sin BarcodeDetector (iPhone/Safari).
+     El archivo vive en este mismo repositorio, NO en un CDN, para que el
+     inventario no dependa de internet. Si falta, la app avisa y ofrece
+     teclear el folio: nunca truena. -->
+<script src="jsQR.js" defer onerror="window.__sinJsQR=true"></script>
 <style>
 :root{
   --ground:#F4F2F1;--surface:#FFFFFF;--surface-2:#EDEAE7;
@@ -15,19 +20,24 @@
   --accent:#A19487;--accent-deep:#6B5D51;
   --ok:#3F6F52;--warn:#B5842B;--crit:#A33F30;--info:#3C5F79;
   --tint-ok:rgba(63,111,82,.10);--tint-warn:rgba(181,132,43,.13);
-  --tint-crit:rgba(163,63,48,.10);--tint-info:rgba(60,95,121,.10);
-  --tint-accent:rgba(161,148,135,.15);
+  --tint-crit:rgba(163,63,48,.10);--tint-accent:rgba(161,148,135,.15);
 }
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;padding:0}
-body{background:var(--ground);color:var(--ink);
+body{
+  background:var(--ground);color:var(--ink);
   font-family:'Jost',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
-  font-weight:300;font-size:16px;line-height:1.5;-webkit-font-smoothing:antialiased;
-  padding-bottom:env(safe-area-inset-bottom)}
+  font-weight:300;font-size:16px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+  padding-bottom:env(safe-area-inset-bottom);
+}
 .mono{font-family:'IBM Plex Mono',ui-monospace,monospace}
 
-header{position:sticky;top:0;z-index:20;background:var(--ink);color:#F4F2F1;
-  padding:calc(10px + env(safe-area-inset-top)) 16px 10px}
+/* barra superior */
+header{
+  position:sticky;top:0;z-index:20;background:var(--ink);color:#F4F2F1;
+  padding:calc(10px + env(safe-area-inset-top)) 16px 10px;
+}
 header .fila{display:flex;justify-content:space-between;align-items:center;gap:10px}
 header .t{font-weight:500;font-size:1.02rem;line-height:1.2}
 header .s{font-family:'IBM Plex Mono',monospace;font-size:.64rem;letter-spacing:.1em;
@@ -37,15 +47,10 @@ header .s{font-family:'IBM Plex Mono',monospace;font-size:.64rem;letter-spacing:
 .estado.pend{background:var(--tint-warn);color:#E0B369}
 .estado.off{background:var(--tint-crit);color:#E4998A}
 
-main{padding:16px 16px 40px;max-width:680px;margin:0 auto}
+main{padding:16px 16px 40px;max-width:640px;margin:0 auto}
 h2{font-size:1.15rem;font-weight:500;margin:0 0 12px}
 p{margin:0 0 12px}
 .sub{color:var(--ink-3);font-size:.9rem}
-.mini{font-size:.82rem;color:var(--ink-3)}
-.centro{text-align:center}
-.oculto{display:none!important}
-.espacio{height:10px}
-.g-caja{display:flex;justify-content:center;margin:16px 0 8px;min-height:44px}
 
 .card{background:var(--surface);border:1px solid var(--rule);border-radius:10px;
   padding:16px;margin-bottom:14px}
@@ -53,17 +58,18 @@ p{margin:0 0 12px}
 
 label{display:block;font-family:'IBM Plex Mono',monospace;font-size:.64rem;
   letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);margin:0 0 5px}
-input,select,textarea{width:100%;padding:12px 13px;border:1px solid var(--rule);
-  border-radius:8px;background:var(--surface);color:var(--ink);
-  font-family:inherit;font-size:16px;font-weight:300}
-input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);
-  outline-offset:1px;border-color:var(--accent)}
+input,select,textarea{
+  width:100%;padding:12px 13px;border:1px solid var(--rule);border-radius:8px;
+  background:var(--surface);color:var(--ink);font-family:inherit;font-size:16px;font-weight:300;
+}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:var(--accent)}
 .campo{margin-bottom:13px}
 .dos{display:grid;grid-template-columns:1fr 1fr;gap:11px}
 
 button{font-family:inherit;font-size:1rem;font-weight:500;border:0;border-radius:9px;
   padding:14px;cursor:pointer;width:100%}
 .b-primary{background:var(--accent);color:#15100C}
+.b-primary:active{filter:brightness(.94)}
 .b-dark{background:var(--ink);color:#F4F2F1}
 .b-ghost{background:transparent;border:1px solid var(--rule);color:var(--ink-2)}
 .b-fila{display:grid;grid-template-columns:1fr 1fr;gap:10px}
@@ -71,12 +77,19 @@ button:disabled{opacity:.5}
 button+button{margin-top:9px}
 .b-fila button+button{margin-top:0}
 
+.folio{
+  text-align:center;padding:18px;background:var(--ink);color:#F4F2F1;border-radius:10px;
+  margin-bottom:14px;
+}
+.folio .lbl{font-family:'IBM Plex Mono',monospace;font-size:.62rem;letter-spacing:.14em;
+  text-transform:uppercase;color:#9AA09C;margin-bottom:5px}
+.folio .n{font-family:'IBM Plex Mono',monospace;font-size:2rem;font-weight:600;letter-spacing:.02em}
+
 .pill{display:inline-block;font-family:'IBM Plex Mono',monospace;font-size:.62rem;
   padding:3px 8px;border-radius:3px;letter-spacing:.05em}
 .p-ok{background:var(--tint-ok);color:var(--ok)}
 .p-warn{background:var(--tint-warn);color:var(--warn)}
 .p-crit{background:var(--tint-crit);color:var(--crit)}
-.p-info{background:var(--tint-info);color:var(--info)}
 .p-neutral{background:var(--surface-2);color:var(--ink-3)}
 
 .aviso{padding:12px 14px;border-radius:8px;margin-bottom:14px;font-size:.9rem}
@@ -90,22 +103,15 @@ button+button{margin-top:9px}
 .lista .item .l{min-width:0}
 .lista .item .l span{display:block;font-family:'IBM Plex Mono',monospace;
   font-size:.6rem;color:var(--ink-3);letter-spacing:.06em}
-.lista .item .l div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:210px}
+.lista .item .l div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
-.linea{border:1px solid var(--rule);border-radius:9px;padding:12px 13px;margin-bottom:10px;
-  background:var(--surface)}
-.linea .cab{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;
-  margin-bottom:6px}
-.linea .cab .nm{font-weight:500;font-size:.94rem;line-height:1.25}
-.linea .datos{font-family:'IBM Plex Mono',monospace;font-size:.7rem;color:var(--ink-3);
-  line-height:1.6}
-.linea .quitar{width:auto;padding:5px 10px;font-size:.72rem;background:transparent;
-  border:1px solid var(--rule);color:var(--ink-3);border-radius:6px;flex:0 0 auto}
-
-.folio-lote{background:var(--ink);color:#F4F2F1;border-radius:9px;padding:13px 15px;
-  margin-bottom:9px}
-.folio-lote .n{font-family:'IBM Plex Mono',monospace;font-size:1.15rem;font-weight:600}
-.folio-lote .d{font-size:.8rem;color:#9AA09C;margin-top:3px}
+#video{width:100%;border-radius:10px;background:#000;display:block}
+.foto-prev{width:100%;border-radius:8px;margin-top:9px;display:block}
+.oculto{display:none!important}
+.centro{text-align:center}
+.mini{font-size:.82rem;color:var(--ink-3)}
+.espacio{height:10px}
+.g-caja{display:flex;justify-content:center;margin:16px 0 8px;min-height:44px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
 </style>
 </head>
@@ -114,7 +120,7 @@ button+button{margin-top:9px}
 <header>
   <div class="fila">
     <div>
-      <div class="t" id="hTitulo">Almacén</div>
+      <div class="t" id="hTitulo">Activos fijos</div>
       <div class="s" id="hSub">MS Universe</div>
     </div>
     <span class="estado" id="hEstado">—</span>
@@ -125,108 +131,141 @@ button+button{margin-top:9px}
 
 <script>
 /* =================================================================
-   Almacén MS Universe — recepción de compras y existencias
-   Zorvix arranca en cero: todo lo que exista entra por aquí.
+   Activos Fijos — MS Universe
+   PWA de levantamiento e inventario. Sin dependencias externas
+   obligatorias: el escáner usa BarcodeDetector si el navegador lo
+   trae, y si no, se captura el folio a mano.
    ================================================================= */
 
-/* La URL del gateway no es secreto: sin una sesión válida no responde nada.
-   Vivir aquí es lo que permite que la app abra directo en Google, sin
-   pantalla de configuración en cada teléfono. */
+/* Misma URL y mismo origen que el almacén: por eso la sesión de Google
+   se comparte y aquí no hay que volver a entrar. */
 var GATEWAY = 'https://script.google.com/macros/s/AKfycbz0VFVwemsK8M2_nqwp-0zMcGuhicVCn5xIwlG1hPAaEnvh7XUdxwvX5AhrhAje3sRggg/exec';
 
-var COLA_KEY = 'msu_alm_cola';
-var SES_KEY = 'msu_alm_sesion';
-var CAT_KEY = 'msu_alm_cat';
+var COLA_KEY = 'msu_activos_cola';
+var SES_KEY = 'msu_alm_sesion';   // la misma llave que el almacén
 
 var estado = {
-  sesion: leer(SES_KEY, null),
-  cat: leer(CAT_KEY, null),
-  cabecera: null,
-  lineas: []
+  sesion: leer(SES_KEY, null),     // {sesion, usuario, nombre, rol}
+  catalogos: null,
+  ubicActual: '',
+  folio: '',
+  pantalla: 'inicio',
+  fotoBase64: null,
+  stream: null
 };
 
+/* ---------- almacenamiento seguro ---------- */
 function leer(k, def) {
   try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : def; }
   catch (e) { return def; }
 }
-function escribir(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
-function $(id) { return document.getElementById(id); }
-function pintar(html) { $('app').innerHTML = html; }
-function esc(s) {
-  return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
-    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; });
-}
-function idCliente() {
-  return 'c' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
-}
-function encabezado(t, s) { $('hTitulo').textContent = t; $('hSub').textContent = s || 'MS Universe'; }
-
-function alertar(msg) {
-  var d = document.createElement('div');
-  d.className = 'aviso a-info';
-  d.textContent = msg;
-  $('app').prepend(d);
-  setTimeout(function () { d.remove(); }, 4000);
+function escribir(k, v) {
+  try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {}
 }
 
 /* ---------- cola offline ---------- */
 function cola() { return leer(COLA_KEY, []); }
+
+/* Guardar en la cola sin perder nada en silencio: si el teléfono se queda
+   sin espacio (las fotos pesan), se suelta la foto y se avisa. */
 function encolar(payload) {
-  var c = cola(); c.push(payload);
-  try { localStorage.setItem(COLA_KEY, JSON.stringify(c)); pintarEstado(); return true; }
-  catch (e) {
-    alertar('El teléfono ya no puede guardar más pendientes. Busca señal antes de seguir.');
-    return false;
+  var c = cola();
+  c.push(payload);
+  try {
+    localStorage.setItem(COLA_KEY, JSON.stringify(c));
+    pintarEstado();
+    return true;
+  } catch (e) { /* cuota llena */ }
+
+  if (payload.foto_base64) {
+    payload.foto_base64 = null;
+    payload.sin_foto = true;
+    try {
+      localStorage.setItem(COLA_KEY, JSON.stringify(c));
+      pintarEstado();
+      alertar('Sin espacio para la foto: el activo se guardó, la foto no. Tómala de nuevo cuando haya señal.');
+      return true;
+    } catch (e2) { /* sigue sin caber */ }
   }
+
+  alertar('El teléfono ya no puede guardar más pendientes. Busca señal antes de seguir capturando.');
+  pintarEstado();
+  return false;
 }
-function quitarDeCola(id) {
-  escribir(COLA_KEY, cola().filter(function (x) { return x.client_id !== id; }));
+function quitarDeCola(clientId) {
+  var c = cola().filter(function (x) { return x.client_id !== clientId; });
+  escribir(COLA_KEY, c);
   pintarEstado();
 }
+
 async function vaciarCola() {
-  var p = cola();
-  if (!p.length || !navigator.onLine) return;
-  for (var i = 0; i < p.length; i++) {
+  var pendientes = cola();
+  if (!pendientes.length || !navigator.onLine) return;
+  for (var i = 0; i < pendientes.length; i++) {
     try {
-      var r = await enviar(p[i], true);
-      if (r && r.ok) quitarDeCola(p[i].client_id); else break;
+      var r = await enviar(pendientes[i], true);
+      if (r && r.ok) quitarDeCola(pendientes[i].client_id);
     } catch (e) { break; }
   }
 }
+
+/* ---------- transporte ---------- */
+function idCliente() {
+  return 'c' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+}
+
+async function enviar(payload, sinEncolar) {
+  if (!payload.client_id) payload.client_id = idCliente();
+  if (estado.sesion && estado.sesion.sesion) payload.sesion = estado.sesion.sesion;
+
+  try {
+    var res = await fetch(GATEWAY, {
+      method: 'POST',
+      // text/plain evita el preflight CORS que Apps Script no responde
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload)
+    });
+    var json = await res.json();
+    if (json && json.ok === false && MOTIVOS_SESION[json.error]) {
+      cerrarSesion(MOTIVOS_SESION[json.error]);
+    }
+    return json;
+  } catch (err) {
+    if (!sinEncolar && payload.encolable) {
+      encolar(payload);
+      return { ok: true, encolado: true };
+    }
+    throw err;
+  }
+}
+
+/* ---------- utilidades de UI ---------- */
+function h(html) { return html; }
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+  });
+}
+function $(id) { return document.getElementById(id); }
+function pintar(html) { $('app').innerHTML = html; }
+
 function pintarEstado() {
-  var e = $('hEstado'), pend = cola().length;
+  var e = $('hEstado');
+  var pend = cola().length;
   if (!navigator.onLine) { e.textContent = '● sin señal'; e.className = 'estado off'; }
   else if (pend) { e.textContent = '● ' + pend + ' por enviar'; e.className = 'estado pend'; }
   else { e.textContent = '● en línea'; e.className = 'estado'; }
 }
 
-/* ---------- transporte ---------- */
-async function enviar(payload, sinEncolar) {
-  if (!payload.client_id) payload.client_id = idCliente();
-  if (estado.sesion && estado.sesion.sesion) payload.sesion = estado.sesion.sesion;
-  try {
-    var res = await fetch(GATEWAY, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify(payload)
-    });
-    var datos = await res.json();
-    // Si la sesión murió, no tiene caso seguir: se limpia y se pide Google.
-    if (datos && datos.ok === false && MOTIVOS_SESION[datos.error]) {
-      cerrarSesion(MOTIVOS_SESION[datos.error]);
-    }
-    return datos;
-  } catch (err) {
-    if (!sinEncolar && payload.encolable) { encolar(payload); return { ok: true, encolado: true }; }
-    throw err;
-  }
+function encabezado(titulo, sub) {
+  $('hTitulo').textContent = titulo;
+  $('hSub').textContent = sub || 'MS Universe';
 }
 
 /* =================================================================
-   Sesión
+   Pantallas
    ================================================================= */
 
-/** La sesión se acabó o la revocaron: limpiar y volver a la puerta. */
 function cerrarSesion(msg) {
   estado.sesion = null;
   escribir(SES_KEY, null);
@@ -235,9 +274,9 @@ function cerrarSesion(msg) {
 
 var MOTIVOS_SESION = {
   SIN_SESION:      'Entra con tu cuenta de Google.',
-  SESION_INVALIDA: 'Tu sesión ya no es válida. Vuelve a entrar.',
-  SESION_EXPIRADA: 'Tu sesión caducó. Vuelve a entrar con Google.',
-  SESION_REVOCADA: 'Tu acceso al almacén fue dado de baja. Habla con el director.'
+  SESION_INVALIDA: 'Tu sesion ya no es valida. Vuelve a entrar.',
+  SESION_EXPIRADA: 'Tu sesion caduco. Vuelve a entrar con Google.',
+  SESION_REVOCADA: 'Tu acceso fue dado de baja. Habla con el director.'
 };
 
 /* ---------- Google Identity ---------- */
@@ -247,12 +286,12 @@ function cargarGIS() {
   if (GIS_LISTO) return GIS_LISTO;
   GIS_LISTO = new Promise(function (ok, falla) {
     if (window.google && google.accounts && google.accounts.id) return ok();
-    var s = document.createElement('script');
-    s.src = 'https://accounts.google.com/gsi/client';
-    s.async = true; s.defer = true;
-    s.onload = function () { ok(); };
-    s.onerror = function () { GIS_LISTO = null; falla(new Error('No se pudo cargar Google')); };
-    document.head.appendChild(s);
+    var sc = document.createElement('script');
+    sc.src = 'https://accounts.google.com/gsi/client';
+    sc.async = true; sc.defer = true;
+    sc.onload = function () { ok(); };
+    sc.onerror = function () { GIS_LISTO = null; falla(new Error('No se pudo cargar Google')); };
+    document.head.appendChild(sc);
   });
   return GIS_LISTO;
 }
@@ -261,23 +300,24 @@ async function entrarConGoogle(credencial) {
   var r = await enviar({ accion: 'login_google', idToken: credencial,
                          dispositivo: navigator.userAgent }, true);
   if (!r.ok) return pantallaLogin(r.error);
-  // La identidad que firma cada movimiento es el correo verificado por Google,
-  // no un nombre escrito a mano. La sesión la emite nuestro backend.
   estado.sesion = { sesion: r.sesion, usuario: r.correo || r.usuario,
                     nombre: r.nombre, rol: r.rol, via: r.via };
   escribir(SES_KEY, estado.sesion);
-  await cargarCat();
+  await cargarCatalogos();
   pantallaInicio();
 }
 
-function pantallaLogin(msg) {
-  encabezado('Entrar', 'Almacén');
-  pintar((msg ? '<div class="aviso a-err">' + esc(msg) + '</div>' : '') +
+function pantallaLogin(mensaje) {
+  encabezado('Entrar', 'Activos fijos');
+  pintar(
+    (mensaje ? '<div class="aviso a-err">' + esc(mensaje) + '</div>' : '') +
     '<div class="card">' +
-    '<p class="sub">Entra con la cuenta de Google que tengas dada de alta en el almacén. ' +
-    'Cada movimiento queda firmado con ese correo.</p>' +
+    '<p class="sub">Entra con la cuenta de Google que tengas dada de alta. ' +
+    'Cada activo queda registrado con ese correo.</p>' +
     '<div id="gBtn" class="g-caja"></div>' +
-    '<div id="gMsg" class="mini"></div></div>');
+    '<div id="gMsg" class="mini"></div>' +
+    '</div>'
+  );
   prepararBotonGoogle();
 }
 
@@ -285,7 +325,7 @@ async function prepararBotonGoogle() {
   var msg = $('gMsg');
   try {
     if (!window.isSecureContext) {
-      msg.innerHTML = 'Esta página tiene que abrirse con <b>https://</b> para poder entrar con Google.';
+      msg.innerHTML = 'Esta pagina tiene que abrirse con <b>https://</b> para entrar con Google.';
       return;
     }
     var cfg = await enviar({ accion: 'config_publica' }, true);
@@ -297,9 +337,9 @@ async function prepararBotonGoogle() {
     google.accounts.id.initialize({
       client_id: cfg.google_client_id,
       callback: function (resp) {
-        $('gMsg').textContent = 'Verificando…';
+        $('gMsg').textContent = 'Verificando...';
         entrarConGoogle(resp.credential).catch(function () {
-          pantallaLogin('Sin conexión. Intenta de nuevo.');
+          pantallaLogin('Sin conexion. Intenta de nuevo.');
         });
       }
     });
@@ -309,326 +349,438 @@ async function prepararBotonGoogle() {
     });
     msg.textContent = '';
   } catch (e) {
-    msg.textContent = 'No se pudo contactar a Google. Revisa tu conexión.';
+    msg.textContent = 'No se pudo contactar a Google. Revisa tu conexion.';
   }
 }
 
-async function cargarCat() {
-  try {
-    var r = await enviar({ accion: 'cat_insumos' }, true);
-    if (r && r.ok) { estado.cat = r; escribir(CAT_KEY, r); }
-  } catch (e) { estado.cat = leer(CAT_KEY, null); }
+async function cargarCatalogos() {
+  var r = await enviar({ accion: 'catalogos' }, true);
+  if (r && r.ok) {
+    estado.catalogos = r;
+    escribir('msu_activos_cat', r);
+  } else {
+    estado.catalogos = leer('msu_activos_cat', null);
+  }
 }
 
-/* =================================================================
-   Inicio
-   ================================================================= */
 function pantallaInicio() {
-  encabezado('Almacén', estado.sesion ? estado.sesion.nombre : '');
-  var c = estado.cat || { catalogo: [], almacenes: [] };
+  encabezado('Activos fijos', estado.sesion ? estado.sesion.nombre : '');
+  var c = estado.catalogos || { ubicaciones: [], siguiente: '—', total: 0 };
+  var opciones = c.ubicaciones.map(function (u) {
+    return '<option value="' + esc(u.id) + '"' + (u.id === estado.ubicActual ? ' selected' : '') + '>' + esc(u.nombre) + '</option>';
+  }).join('');
+
   pintar(
-    '<div class="card"><h3>Recepción de compra</h3>' +
-    '<p class="sub">Todo lo que entra al almacén pasa por aquí. Cada renglón crea un lote con su folio, su caducidad y su costo.</p>' +
-    '<button class="b-primary" id="bNueva">Nueva recepción</button></div>' +
+    '<div class="card">' +
+    '<h3>¿En qué espacio estás?</h3>' +
+    '<p class="sub">Se fija una vez al entrar al cuarto. Todo lo que des de alta se guarda aquí.</p>' +
+    '<div class="campo"><select id="sUbic"><option value="">Elige un espacio…</option>' + opciones + '</select></div>' +
+    '</div>' +
 
-    '<div class="card"><h3>Consulta</h3>' +
+    '<div class="card">' +
+    '<h3>Levantamiento</h3>' +
+    '<p class="sub">Pegas la etiqueta, la app lleva el folio sola. No hace falta escanear en el primer recorrido.</p>' +
+    '<button class="b-primary" id="bLevantar">Empezar a levantar</button>' +
+    '</div>' +
+
+    '<div class="card">' +
+    '<h3>Buscar o verificar</h3>' +
+    '<p class="sub">Para inventarios posteriores y para consultar un activo ya etiquetado.</p>' +
     '<div class="b-fila">' +
-    '<button class="b-dark" id="bExist">Existencias</button>' +
-    '<button class="b-ghost" id="bLotes">Últimos lotes</button></div></div>' +
+    '<button class="b-dark" id="bEscanear">Escanear</button>' +
+    '<button class="b-ghost" id="bManual">Teclear folio</button>' +
+    '</div>' +
+    '<div class="espacio"></div>' +
+    '<button class="b-ghost" id="bLista">Ver lo que hay aquí</button>' +
+    '</div>' +
 
-    '<div class="card"><div class="lista">' +
-    '<div class="item"><div class="l"><div>SKU en catálogo</div></div><span class="pill p-neutral">' + c.catalogo.length + '</span></div>' +
-    '<div class="item"><div class="l"><div>Almacenes activos</div></div><span class="pill p-neutral">' + c.almacenes.length + '</span></div>' +
+    '<div class="card">' +
+    '<div class="lista">' +
+    '<div class="item"><div class="l"><div>Activos registrados</div></div><span class="pill p-neutral">' + esc(c.total) + '</span></div>' +
+    '<div class="item"><div class="l"><div>Siguiente folio</div></div><span class="pill p-ok mono">' + esc(c.siguiente) + '</span></div>' +
     '<div class="item"><div class="l"><div>Pendientes por enviar</div></div><span class="pill ' + (cola().length ? 'p-warn' : 'p-neutral') + '">' + cola().length + '</span></div>' +
     '</div>' +
-    (cola().length ? '<div class="espacio"></div><button class="b-ghost" id="bReint">Reintentar envío</button>' : '') +
+    (cola().length ? '<div class="espacio"></div><button class="b-ghost" id="bReintentar">Reintentar envío</button>' : '') +
     '</div>' +
-    '<button class="b-ghost" id="bSalir">Cerrar sesión</button>');
 
-  $('bNueva').onclick = function () {
-    if (!c.almacenes.length) return alertar('No hay almacenes activos. Revisa la hoja UBICACIONES.');
-    pantallaCabecera();
+    '<button class="b-ghost" id="bSalir">Cerrar sesión</button>'
+  );
+
+  $('sUbic').onchange = function () { estado.ubicActual = this.value; };
+  $('bLevantar').onclick = function () {
+    if (!estado.ubicActual) return alertar('Primero elige el espacio en el que estás.');
+    var sig = (estado.catalogos && estado.catalogos.siguiente) || '';
+    if (!sig || sig === '—') {
+      sig = prompt('¿Con qué folio empiezo? (ejemplo: ACT-00001)');
+      if (!sig) return;
+      sig = sig.trim().toUpperCase();
+    }
+    estado.folio = sig;
+    pantallaFicha(null, sig, true);
   };
-  $('bExist').onclick = function () { pantallaExistencias(); };
-  $('bLotes').onclick = function () { pantallaLotes(); };
-  $('bSalir').onclick = function () { estado.sesion = null; escribir(SES_KEY, null); pantallaLogin(); };
-  if ($('bReint')) $('bReint').onclick = async function () {
+  $('bEscanear').onclick = function () { pantallaEscaner(); };
+  $('bManual').onclick = function () { pedirFolio(); };
+  $('bLista').onclick = function () { pantallaLista(); };
+  $('bSalir').onclick = function () {
+    estado.sesion = null; escribir(SES_KEY, null); pantallaLogin();
+  };
+  if ($('bReintentar')) $('bReintentar').onclick = async function () {
     this.textContent = 'Enviando…'; await vaciarCola(); pantallaInicio();
   };
   pintarEstado();
 }
 
-/* =================================================================
-   Recepción — paso 1: cabecera
-   ================================================================= */
-function hoyISO() {
-  var d = new Date();
-  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' +
-         String(d.getDate()).padStart(2, '0');
+function alertar(msg) {
+  var d = document.createElement('div');
+  d.className = 'aviso a-info';
+  d.textContent = msg;
+  $('app').prepend(d);
+  setTimeout(function () { d.remove(); }, 3500);
 }
 
-function pantallaCabecera() {
-  encabezado('Nueva recepción', 'Datos de la compra');
-  var c = estado.cat;
-  var cab = estado.cabecera || {};
-  var optAlm = c.almacenes.map(function (a) {
-    return '<option value="' + esc(a.id) + '"' + (cab.almacen === a.id ? ' selected' : '') + '>' + esc(a.nombre) + '</option>';
+/* ---------- ficha / alta ---------- */
+function pantallaFicha(activo, folio, modoLevantamiento) {
+  encabezado(activo ? 'Ficha del activo' : 'Alta de activo', folio);
+  estado.fotoBase64 = null;
+  var c = estado.catalogos || { categorias: [], estados: [], ubicaciones: [], usuarios: [], sugerencias: [], comprobantes: [] };
+  var a = activo || {};
+
+  var optCat = c.categorias.map(function (x) {
+    return '<option' + (a.categoria === x ? ' selected' : '') + '>' + esc(x) + '</option>';
   }).join('');
-  var optComp = (c.comprobantes || []).map(function (x) {
-    return '<option' + (cab.comprobante === x ? ' selected' : '') + '>' + esc(x) + '</option>';
+  var optEst = c.estados.map(function (x) {
+    return '<option' + (a.estado === x ? ' selected' : '') + '>' + esc(x) + '</option>';
   }).join('');
-  var provs = (c.proveedores || []).map(function (p) {
-    return '<option value="' + esc(p) + '">'; }).join('');
+  var optUbic = c.ubicaciones.map(function (u) {
+    var sel = (a.ubic_id || estado.ubicActual) === u.id ? ' selected' : '';
+    return '<option value="' + esc(u.id) + '"' + sel + '>' + esc(u.nombre) + '</option>';
+  }).join('');
+  var sugerencias = (c.sugerencias || []).map(function (s) {
+    return '<option value="' + esc(s) + '">';
+  }).join('');
+  var optComp = '<option value="">Por confirmar</option>' +
+    (c.comprobantes || ['FACTURA', 'NOTA', 'PENDIENTE', 'SIN COMPROBANTE']).map(function (x) {
+      return '<option' + (a.comprobante === x ? ' selected' : '') + '>' + esc(x) + '</option>';
+    }).join('');
 
   pintar(
+    '<div class="folio"><div class="lbl">' + (modoLevantamiento ? 'Pega esta etiqueta' : 'Folio') + '</div>' +
+    '<div class="n">' + esc(folio) + '</div></div>' +
+
     '<div class="card">' +
-    '<div class="campo"><label>Almacén que recibe</label><select id="kAlm">' + optAlm + '</select></div>' +
-    '<div class="campo"><label>Fecha de recepción</label><input id="kFecha" type="date" value="' + esc(cab.fecha || hoyISO()) + '"></div>' +
-    '<div class="campo"><label>Proveedor</label><input id="kProv" list="lprov" value="' + esc(cab.proveedor || '') + '">' +
-    '<datalist id="lprov">' + provs + '</datalist></div>' +
+    '<div class="campo"><label>¿Qué es?</label>' +
+    '<input id="fNombre" list="sug" placeholder="Sillón de tratamiento" value="' + esc(a.nombre || '') + '">' +
+    '<datalist id="sug">' + sugerencias + '</datalist></div>' +
+
+    '<div class="campo"><label>Categoría</label><select id="fCat">' + optCat + '</select></div>' +
+    '<div class="campo"><label>Ubicación</label><select id="fUbic">' + optUbic + '</select></div>' +
+
     '<div class="dos">' +
-    '<div class="campo"><label>Comprobante</label><select id="kComp">' + optComp + '</select></div>' +
-    '<div class="campo"><label>Folio fiscal</label><input id="kFolio" placeholder="UUID" value="' + esc(cab.folio_fiscal || '') + '"></div>' +
+    '<div class="campo"><label>Marca</label><input id="fMarca" value="' + esc(a.marca || '') + '"></div>' +
+    '<div class="campo"><label>Modelo</label><input id="fModelo" value="' + esc(a.modelo || '') + '"></div>' +
     '</div>' +
-    '<p class="mini">Si la factura llega después, elige PENDIENTE y captura el folio cuando la tengas. El material entra igual: lo que existe físicamente siempre está en el sistema.</p>' +
-    '</div>' +
-    '<button class="b-primary" id="bSig">Continuar a los renglones</button>' +
-    '<button class="b-ghost" id="bCanc">Cancelar</button>');
 
-  $('bCanc').onclick = function () { estado.cabecera = null; estado.lineas = []; pantallaInicio(); };
-  $('bSig').onclick = function () {
-    estado.cabecera = {
-      almacen: $('kAlm').value, fecha: $('kFecha').value,
-      proveedor: $('kProv').value.trim(), comprobante: $('kComp').value,
-      folio_fiscal: $('kFolio').value.trim()
-    };
-    if (!estado.cabecera.proveedor) return alertar('Falta el proveedor.');
-    pantallaLineas();
-  };
-}
+    '<div class="campo"><label>Número de serie</label><input id="fSerie" value="' + esc(a.numero_serie || '') + '"></div>' +
 
-/* =================================================================
-   Recepción — paso 2: renglones (uno por lote)
-   ================================================================= */
-function pantallaLineas() {
-  encabezado('Renglones', 'Uno por lote, no por producto');
-  var c = estado.cat;
-  var opciones = c.catalogo.map(function (s) {
-    return '<option value="' + esc(s.sku) + '">' + esc(s.sku + ' · ' + s.nombre) + '</option>';
-  }).join('');
-
-  var listaHTML = estado.lineas.map(function (l, i) {
-    return '<div class="linea"><div class="cab"><div>' +
-      '<div class="nm">' + esc(l.nombre) + '</div>' +
-      '<div class="datos">' + esc(l.sku) + ' · lote ' + esc(l.lote_proveedor || '—') +
-      ' · cad ' + esc(l.caducidad || '—') + '<br>' +
-      esc(l.cantidad) + ' ' + esc(l.unidad_base || '') + ' × $' + esc(l.costo_unitario) +
-      (String(l.costo_fiscal) !== String(l.costo_unitario) ? ' (fiscal $' + esc(l.costo_fiscal) + ')' : '') +
-      '</div></div>' +
-      '<button class="quitar" data-i="' + i + '">Quitar</button></div></div>';
-  }).join('');
-
-  pintar(
-    '<div class="card"><h3>Agregar renglón</h3>' +
-    '<p class="mini">Si el mismo producto llega en dos lotes o con dos caducidades, son dos renglones. Es lo único que después permite rastrear qué lote se usó en qué paciente.</p>' +
-    '<div class="campo"><label>Producto</label>' +
-    '<input id="rSku" list="lsku" placeholder="Escribe o elige el código">' +
-    '<datalist id="lsku">' + opciones + '</datalist></div>' +
     '<div class="dos">' +
-    '<div class="campo"><label>Lote del fabricante</label><input id="rLote"></div>' +
-    '<div class="campo"><label>Caducidad</label><input id="rCad" type="date"></div>' +
+    '<div class="campo"><label>Estado</label><select id="fEstado">' + optEst + '</select></div>' +
+    '<div class="campo"><label>Responsable</label><input id="fResp" value="' + esc(a.responsable || '') + '"></div>' +
     '</div>' +
+
     '<div class="dos">' +
-    '<div class="campo"><label>Cantidad (unidad base)</label><input id="rCant" type="number" inputmode="decimal" min="0" step="any"></div>' +
-    '<div class="campo"><label>Costo unitario real</label><input id="rCosto" type="number" inputmode="decimal" min="0" step="any"></div>' +
-    '</div>' +
-    '<div class="campo"><label>Costo fiscal (si es distinto)</label><input id="rFiscal" type="number" inputmode="decimal" min="0" step="any" placeholder="Igual al real si lo dejas vacío"></div>' +
-    '<button class="b-dark" id="bAdd">Agregar renglón</button>' +
-    '<div class="espacio"></div>' +
-    '<button class="b-ghost" id="bNuevoSku">El producto no está en el catálogo</button>' +
+    '<div class="campo"><label>¿Es un conjunto?</label><select id="fConj">' +
+    '<option value="NO"' + (a.es_conjunto === 'SI' ? '' : ' selected') + '>No, es una pieza</option>' +
+    '<option value="SI"' + (a.es_conjunto === 'SI' ? ' selected' : '') + '>Sí, son varias iguales</option>' +
+    '</select></div>' +
+    '<div class="campo"><label>¿Cuántas?</label><input id="fCant" type="number" inputmode="numeric" min="1" value="' + esc(a.cantidad_conjunto || 1) + '"></div>' +
     '</div>' +
 
-    (estado.lineas.length
-      ? '<div class="card"><h3>' + estado.lineas.length + ' renglón' + (estado.lineas.length > 1 ? 'es' : '') + ' capturado' + (estado.lineas.length > 1 ? 's' : '') + '</h3>' + listaHTML + '</div>'
-      : '<div class="card"><p class="sub centro">Todavía no hay renglones.</p></div>') +
+    '<div class="dos">' +
+    '<div class="campo"><label>Comprobante</label><select id="fComp">' + optComp + '</select></div>' +
+    '<div class="campo"><label>Folio fiscal</label><input id="fFolioFiscal" placeholder="UUID, si lo tienes" value="' + esc(a.folio_fiscal || '') + '"></div>' +
+    '</div>' +
+    '<p class="mini">Si no lo sabes ahora, déjalo en «Por confirmar» y se completa después desde el Sheet. El activo se registra igual.</p>' +
 
-    '<button class="b-primary" id="bGuardar"' + (estado.lineas.length ? '' : ' disabled') + '>Guardar recepción</button>' +
-    '<button class="b-ghost" id="bAtras">Volver a los datos de la compra</button>');
+    '<div class="campo"><label>Foto</label>' +
+    '<input id="fFoto" type="file" accept="image/*" capture="environment">' +
+    '<img id="prev" class="foto-prev oculto" alt="">' +
+    (a.foto_url ? '<p class="mini">Ya tiene foto guardada. Si tomas otra, la reemplaza.</p>' : '') +
+    '</div>' +
 
-  $('bAtras').onclick = function () { pantallaCabecera(); };
-  $('bNuevoSku').onclick = function () { pantallaSkuNuevo(); };
+    '<div class="campo"><label>Notas</label><textarea id="fNotas" rows="2">' + esc(a.notas || '') + '</textarea></div>' +
+    '</div>' +
 
-  Array.prototype.forEach.call(document.querySelectorAll('.quitar'), function (b) {
-    b.onclick = function () {
-      estado.lineas.splice(parseInt(this.getAttribute('data-i'), 10), 1);
-      pantallaLineas();
-    };
-  });
+    '<button class="b-primary" id="bGuardar">' + (modoLevantamiento ? 'Guardar y siguiente' : 'Guardar') + '</button>' +
+    (modoLevantamiento ? '<button class="b-ghost" id="bSaltar">Saltar este folio</button>' : '') +
+    '<button class="b-ghost" id="bVolver">Volver al inicio</button>'
+  );
 
-  $('bAdd').onclick = function () {
-    var sku = $('rSku').value.trim().toUpperCase();
-    var art = null;
-    c.catalogo.forEach(function (s) { if (String(s.sku).toUpperCase() === sku) art = s; });
-    if (!art) return alertar('Ese código no está en el catálogo. Usa el botón de abajo para darlo de alta.');
-
-    var cant = parseFloat($('rCant').value);
-    if (!cant || cant <= 0) return alertar('Falta la cantidad.');
-    var costo = parseFloat($('rCosto').value);
-    if (isNaN(costo)) return alertar('Falta el costo unitario.');
-    var fiscal = $('rFiscal').value === '' ? costo : parseFloat($('rFiscal').value);
-
-    if (art.nivel !== 'N3' && !$('rCad').value) {
-      if (!confirm('Este insumo se controla por lote y no capturaste caducidad. ¿Agregar de todos modos?')) return;
-    }
-
-    estado.lineas.push({
-      sku: art.sku, nombre: art.nombre, unidad_base: art.unidad_base,
-      lote_proveedor: $('rLote').value.trim(), caducidad: $('rCad').value,
-      cantidad: cant, costo_unitario: costo, costo_fiscal: fiscal
+  $('fFoto').onchange = function () {
+    var f = this.files && this.files[0];
+    if (!f) return;
+    comprimir(f, function (b64) {
+      estado.fotoBase64 = b64;
+      var img = $('prev'); img.src = b64; img.classList.remove('oculto');
     });
-    pantallaLineas();
+  };
+
+  $('bVolver').onclick = function () { pantallaInicio(); };
+  if ($('bSaltar')) $('bSaltar').onclick = function () {
+    estado.folio = siguienteLocal(folio);
+    pantallaFicha(null, estado.folio, true);
   };
 
   $('bGuardar').onclick = async function () {
+    var nombre = $('fNombre').value.trim();
+    if (!nombre) return alertar('Falta decir qué es.');
     this.disabled = true; this.textContent = 'Guardando…';
+
     var payload = {
-      accion: 'recepcion_guardar', encolable: true, client_id: idCliente(),
-      cabecera: estado.cabecera, lineas: estado.lineas
+      accion: 'guardar',
+      encolable: true,
+      client_id: idCliente(),
+      foto_base64: estado.fotoBase64,
+      activo: {
+        activo_id: folio,
+        nombre: nombre,
+        categoria: $('fCat').value,
+        marca: $('fMarca').value.trim(),
+        modelo: $('fModelo').value.trim(),
+        numero_serie: $('fSerie').value.trim(),
+        ubic_id: $('fUbic').value,
+        responsable: $('fResp').value.trim(),
+        estado: $('fEstado').value,
+        es_conjunto: $('fConj').value,
+        cantidad_conjunto: $('fCant').value,
+        comprobante: $('fComp').value,
+        folio_fiscal: $('fFolioFiscal').value.trim(),
+        notas: $('fNotas').value.trim()
+      }
     };
+
     try {
       var r = await enviar(payload);
-      if (r.ok === false) {
-        this.disabled = false; this.textContent = 'Guardar recepción';
-        return alertar(r.error);
-      }
-      if (r.encolado) {
-        estado.cabecera = null; estado.lineas = [];
+      if (r.ok === false) { this.disabled = false; this.textContent = 'Guardar'; return alertar(r.error); }
+      if (r.siguiente && estado.catalogos) estado.catalogos.siguiente = r.siguiente;
+
+      if (modoLevantamiento) {
+        var sig = r.siguiente || siguienteLocal(folio);
+        estado.folio = sig;
+        pantallaFicha(null, sig, true);
+        alertar(r.encolado ? 'Guardado en el teléfono. Se enviará al recuperar señal.' : 'Guardado.');
+      } else {
         pantallaInicio();
-        return alertar('Guardado en el teléfono. Se enviará al recuperar señal. Los folios de lote se asignan al enviarse.');
+        alertar('Guardado.');
       }
-      pantallaFolios(r);
     } catch (e) {
-      this.disabled = false; this.textContent = 'Guardar recepción';
+      this.disabled = false; this.textContent = 'Guardar';
       alertar('No se pudo guardar. Revisa la señal.');
     }
   };
 }
 
-function pantallaSkuNuevo() {
-  encabezado('Producto nuevo', 'Alta rápida');
-  var c = estado.cat;
-  var optU = (c.unidades || []).map(function (u) { return '<option>' + esc(u) + '</option>'; }).join('');
-  var optN = (c.niveles || []).map(function (n) {
-    return '<option' + (n === 'N2' ? ' selected' : '') + '>' + esc(n) + '</option>'; }).join('');
-  pintar(
-    '<div class="card">' +
-    '<p class="mini">Alta mínima para no detener la recepción. Los demás campos se completan después en el catálogo.</p>' +
-    '<div class="campo"><label>Código (SKU)</label><input id="nSku" placeholder="SUT-009"></div>' +
-    '<div class="campo"><label>Nombre</label><input id="nNom"></div>' +
-    '<div class="campo"><label>Presentación</label><input id="nPres" placeholder="Sobre, caja de 12…"></div>' +
-    '<div class="dos">' +
-    '<div class="campo"><label>Unidad base</label><select id="nUni">' + optU + '</select></div>' +
-    '<div class="campo"><label>Nivel de control</label><select id="nNiv">' + optN + '</select></div>' +
-    '</div>' +
-    '<p class="mini">La unidad base es en la que se descuenta, no en la que se compra: piezas y no cajas, mililitros y no frascos.</p>' +
-    '</div>' +
-    '<button class="b-primary" id="bAlta">Dar de alta y volver</button>' +
-    '<button class="b-ghost" id="bVolver">Cancelar</button>');
+function siguienteLocal(folio) {
+  var m = String(folio).match(/(\D*)(\d+)$/);
+  if (!m) return folio;
+  var n = String(parseInt(m[2], 10) + 1);
+  while (n.length < m[2].length) n = '0' + n;
+  return m[1] + n;
+}
 
-  $('bVolver').onclick = function () { pantallaLineas(); };
-  $('bAlta').onclick = async function () {
-    var sku = $('nSku').value.trim().toUpperCase();
-    if (!sku || !$('nNom').value.trim()) return alertar('Falta el código o el nombre.');
-    this.disabled = true; this.textContent = 'Guardando…';
-    try {
-      var r = await enviar({ accion: 'sku_alta', sku: {
-        sku: sku, nombre: $('nNom').value.trim(), presentacion: $('nPres').value.trim(),
-        unidad_base: $('nUni').value, nivel_control: $('nNiv').value
-      } }, true);
-      if (!r.ok) { this.disabled = false; this.textContent = 'Dar de alta y volver'; return alertar(r.error); }
-      await cargarCat();
-      pantallaLineas();
-      alertar('Producto agregado al catálogo.');
-    } catch (e) {
-      this.disabled = false; this.textContent = 'Dar de alta y volver';
-      alertar('Sin conexión: el alta de un producto nuevo necesita señal.');
-    }
+function comprimir(file, cb) {
+  var lector = new FileReader();
+  lector.onload = function (ev) {
+    var img = new Image();
+    img.onload = function () {
+      var max = 1280;
+      var escala = Math.min(1, max / Math.max(img.width, img.height));
+      var cv = document.createElement('canvas');
+      cv.width = Math.round(img.width * escala);
+      cv.height = Math.round(img.height * escala);
+      cv.getContext('2d').drawImage(img, 0, 0, cv.width, cv.height);
+      cb(cv.toDataURL('image/jpeg', 0.72));
+    };
+    img.src = ev.target.result;
   };
+  lector.readAsDataURL(file);
 }
 
-/* =================================================================
-   Recepción — paso 3: folios para etiquetar
-   ================================================================= */
-function pantallaFolios(r) {
-  encabezado('Recepción guardada', r.recepcion_id || '');
-  estado.cabecera = null; estado.lineas = [];
-  var folios = (r.lotes || []).map(function (l) {
-    return '<div class="folio-lote"><div class="n">' + esc(l.lote_id) + '</div>' +
-      '<div class="d">' + esc(l.sku) + ' · ' + esc(l.cantidad) +
-      (l.caducidad ? ' · caduca ' + esc(l.caducidad) : '') + '</div></div>';
-  }).join('');
-
-  pintar(
-    '<div class="aviso a-ok">Recepción ' + esc(r.recepcion_id) + ' registrada con ' +
-    (r.lotes || []).length + ' lote(s).</div>' +
-    '<div class="card"><h3>Etiqueta estos lotes</h3>' +
-    '<p class="mini">Escribe o pega el folio en cada empaque antes de guardarlo en el anaquel. A partir de aquí, ese folio es la identidad del lote.</p>' +
-    folios + '</div>' +
-    '<button class="b-primary" id="bOtra">Registrar otra recepción</button>' +
-    '<button class="b-ghost" id="bInicio">Volver al inicio</button>');
-
-  $('bOtra').onclick = function () { pantallaCabecera(); };
-  $('bInicio').onclick = function () { pantallaInicio(); };
+/* ---------- escáner ---------- */
+function pedirFolio() {
+  var f = prompt('Folio del activo (ejemplo: ACT-00042)');
+  if (f) abrirFolio(f.trim().toUpperCase());
 }
 
-/* =================================================================
-   Consultas
-   ================================================================= */
-async function pantallaExistencias() {
-  var c = estado.cat || { almacenes: [] };
-  encabezado('Existencias', 'Derivadas del kardex');
-  pintar('<div class="card"><p class="sub">Cargando…</p></div>');
+async function abrirFolio(folio) {
   try {
-    var r = await enviar({ accion: 'existencias' }, true);
-    if (!r.ok) return pintar('<div class="aviso a-err">' + esc(r.error) + '</div>');
-    var nombresAlm = {};
-    c.almacenes.forEach(function (a) { nombresAlm[a.id] = a.nombre; });
-
-    var filas = r.existencias.map(function (x) {
-      return '<div class="item"><div class="l"><span>' + esc(x.lote_id) + ' · ' +
-        esc(nombresAlm[x.ubic_id] || x.ubic_id) + '</span><div>' + esc(x.nombre) + '</div></div>' +
-        '<span class="pill p-ok mono">' + esc(x.cantidad) + '</span></div>';
-    }).join('');
-
-    pintar('<div class="card"><h3>' + r.existencias.length + ' renglones con existencia</h3>' +
-      '<div class="lista">' + (filas || '<p class="sub centro">El almacén está en cero. Todo lo que entre lo hará por una recepción.</p>') + '</div></div>' +
-      '<button class="b-ghost" id="bV">Volver</button>');
-    $('bV').onclick = function () { pantallaInicio(); };
+    var r = await enviar({ accion: 'resolver', folio: folio }, true);
+    if (!r.ok) return alertar(r.error);
+    if (r.existe) pantallaActivo(r.activo);
+    else pantallaFicha(null, folio, false);
   } catch (e) {
-    pintar('<div class="aviso a-err">Sin conexión.</div><button class="b-ghost" id="bV">Volver</button>');
-    $('bV').onclick = function () { pantallaInicio(); };
+    alertar('Sin conexión: para consultar un activo necesitas señal.');
   }
 }
 
-async function pantallaLotes() {
-  encabezado('Últimos lotes', 'Recepciones recientes');
+/* Tres caminos, en orden de preferencia:
+   1. BarcodeDetector nativo  → Chrome de Android, sin dependencias.
+   2. jsQR.js del propio repo → iPhone/Safari y cualquier navegador viejo.
+      Vive en el repositorio, no en un CDN: funciona sin internet.
+   3. Teclear el folio        → siempre disponible.                        */
+async function pantallaEscaner() {
+  encabezado('Escanear', 'Apunta al código');
+  pintar(
+    '<div class="card"><video id="video" playsinline muted autoplay></video>' +
+    '<canvas id="lienzo" class="oculto"></canvas>' +
+    '<p class="mini centro" id="msgEscaner">Abriendo cámara…</p></div>' +
+    '<button class="b-ghost" id="bTeclear">Teclear el folio</button>' +
+    '<button class="b-ghost" id="bVolver">Volver</button>'
+  );
+  $('bTeclear').onclick = function () { detenerCamara(); pedirFolio(); };
+  $('bVolver').onclick = function () { detenerCamara(); pantallaInicio(); };
+
+  var hayNativo = ('BarcodeDetector' in window);
+  var hayJsQR = (typeof window.jsQR === 'function');
+
+  if (!hayNativo && !hayJsQR) {
+    $('msgEscaner').textContent =
+      'Este navegador no puede leer códigos y falta el archivo jsQR.js en el servidor. Usa "Teclear el folio".';
+    return;
+  }
+
+  var v = $('video');
+  try {
+    estado.stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' } },
+      audio: false
+    });
+    v.srcObject = estado.stream;
+    v.setAttribute('playsinline', 'true');   // iOS: sin esto abre a pantalla completa
+    await v.play();
+  } catch (e) {
+    $('msgEscaner').textContent =
+      'No se pudo abrir la cámara. Da permiso al sitio, o teclea el folio. ' +
+      'En iPhone se necesita iOS 14.3 o posterior.';
+    return;
+  }
+
+  $('msgEscaner').textContent = 'Buscando código…';
+
+  var detector = hayNativo
+    ? new window.BarcodeDetector({ formats: ['qr_code', 'code_128', 'code_39'] })
+    : null;
+  var lienzo = $('lienzo');
+  var ctx = lienzo.getContext('2d', { willReadFrequently: true });
+  var buscando = true;
+
+  function encontrado(valor) {
+    buscando = false;
+    detenerCamara();
+    if (navigator.vibrate) navigator.vibrate(60);
+    abrirFolio(String(valor || '').trim().toUpperCase());
+  }
+
+  (async function bucle() {
+    while (buscando && estado.stream) {
+      try {
+        if (detector) {
+          var codigos = await detector.detect(v);
+          if (codigos && codigos.length) return encontrado(codigos[0].rawValue);
+        } else if (v.videoWidth) {
+          // Se reduce el fotograma: decodificar en tamaño completo tumba a los teléfonos modestos
+          var ancho = 480;
+          var alto = Math.round(v.videoHeight * (ancho / v.videoWidth));
+          lienzo.width = ancho; lienzo.height = alto;
+          ctx.drawImage(v, 0, 0, ancho, alto);
+          var img = ctx.getImageData(0, 0, ancho, alto);
+          var r = window.jsQR(img.data, ancho, alto, { inversionAttempts: 'dontInvert' });
+          if (r && r.data) return encontrado(r.data);
+        }
+      } catch (e) { /* fotograma ilegible: seguimos */ }
+      await new Promise(function (res) { setTimeout(res, detector ? 220 : 120); });
+    }
+  })();
+}
+
+function detenerCamara() {
+  if (estado.stream) {
+    estado.stream.getTracks().forEach(function (t) { t.stop(); });
+    estado.stream = null;
+  }
+}
+
+/* ---------- activo existente ---------- */
+function pantallaActivo(a) {
+  encabezado(a.nombre || 'Activo', a.activo_id);
+  pintar(
+    '<div class="folio"><div class="lbl">Folio</div><div class="n">' + esc(a.activo_id) + '</div></div>' +
+    '<div class="card">' +
+    '<h3>' + esc(a.nombre) + '</h3>' +
+    (a.foto_url && a.foto_url !== 'ERROR_FOTO' ? '<img class="foto-prev" src="' + esc(a.foto_url) + '" alt="">' : '') +
+    '<div class="lista" style="margin-top:10px">' +
+    fila('Categoría', a.categoria) +
+    fila('Ubicación', a.ubic_nombre || a.ubic_id) +
+    fila('Estado', a.estado) +
+    fila('Responsable', a.responsable) +
+    fila('Marca / modelo', [a.marca, a.modelo].filter(Boolean).join(' · ')) +
+    fila('Serie', a.numero_serie) +
+    fila('Comprobante', a.comprobante) +
+    '</div></div>' +
+
+    '<button class="b-primary" id="bAqui">Está aquí — confirmar</button>' +
+    '<button class="b-dark" id="bMover">Moverlo a este espacio</button>' +
+    '<button class="b-ghost" id="bEditar">Editar ficha</button>' +
+    '<button class="b-ghost" id="bVolver">Volver</button>'
+  );
+
+  $('bVolver').onclick = function () { pantallaInicio(); };
+  $('bEditar').onclick = function () { pantallaFicha(a, a.activo_id, false); };
+
+  $('bAqui').onclick = async function () {
+    this.disabled = true;
+    try {
+      await enviar({ accion: 'verificar', folio: a.activo_id, encolable: true });
+      pantallaInicio(); alertar('Verificado.');
+    } catch (e) { alertar('No se pudo registrar.'); }
+  };
+
+  $('bMover').onclick = async function () {
+    if (!estado.ubicActual) return alertar('Primero elige en el inicio el espacio en el que estás.');
+    this.disabled = true;
+    try {
+      await enviar({ accion: 'mover', folio: a.activo_id, ubic_destino: estado.ubicActual, encolable: true });
+      pantallaInicio(); alertar('Reubicado.');
+    } catch (e) { alertar('No se pudo mover.'); }
+  };
+}
+
+function fila(k, v) {
+  if (!v) return '';
+  return '<div class="item"><div class="l"><span>' + esc(k) + '</span></div><div>' + esc(v) + '</div></div>';
+}
+
+/* ---------- lista por ubicación ---------- */
+async function pantallaLista() {
+  if (!estado.ubicActual) return alertar('Primero elige el espacio en el que estás.');
+  encabezado('Inventario del espacio', estado.ubicActual);
   pintar('<div class="card"><p class="sub">Cargando…</p></div>');
   try {
-    var r = await enviar({ accion: 'lotes_recientes', limite: 25 }, true);
+    var r = await enviar({ accion: 'listar', ubic_id: estado.ubicActual }, true);
     if (!r.ok) return pintar('<div class="aviso a-err">' + esc(r.error) + '</div>');
-    var filas = r.lotes.map(function (l) {
-      return '<div class="item"><div class="l"><span>' + esc(l.lote_id) + '</span>' +
-        '<div>' + esc(l.sku) + ' · ' + esc(l.proveedor || '—') + '</div></div>' +
-        '<span class="pill ' + (l.comprobante === 'FACTURA' ? 'p-ok' : 'p-warn') + '">' +
-        esc(l.comprobante || '—') + '</span></div>';
+    var filas = r.activos.map(function (a) {
+      return '<div class="item"><div class="l"><span>' + esc(a.activo_id) + '</span>' +
+        '<div>' + esc(a.nombre) + '</div></div>' +
+        '<span class="pill p-neutral">' + esc(a.estado || '—') + '</span></div>';
     }).join('');
-    pintar('<div class="card"><h3>Últimos ' + r.lotes.length + ' lotes</h3>' +
-      '<div class="lista">' + (filas || '<p class="sub centro">Todavía no hay lotes.</p>') + '</div></div>' +
-      '<button class="b-ghost" id="bV">Volver</button>');
-    $('bV').onclick = function () { pantallaInicio(); };
+    pintar(
+      '<div class="card"><h3>' + r.activos.length + ' activos registrados aquí</h3>' +
+      '<div class="lista">' + (filas || '<p class="sub">Todavía no hay nada.</p>') + '</div></div>' +
+      '<button class="b-ghost" id="bVolver">Volver</button>'
+    );
+    $('bVolver').onclick = function () { pantallaInicio(); };
   } catch (e) {
-    pintar('<div class="aviso a-err">Sin conexión.</div><button class="b-ghost" id="bV">Volver</button>');
-    $('bV').onclick = function () { pantallaInicio(); };
+    pintar('<div class="aviso a-err">Sin conexión.</div>' +
+           '<button class="b-ghost" onclick="pantallaInicio()">Volver</button>');
   }
 }
 
@@ -641,8 +793,9 @@ window.addEventListener('offline', pintarEstado);
 (async function inicio() {
   pintarEstado();
   if (!estado.sesion || !estado.sesion.sesion) return pantallaLogin();
+  estado.catalogos = leer('msu_activos_cat', null);
   pantallaInicio();
-  try { await cargarCat(); pantallaInicio(); } catch (e) {}
+  try { await cargarCatalogos(); pantallaInicio(); } catch (e) {}
   vaciarCola();
 })();
 
