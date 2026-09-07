@@ -129,13 +129,16 @@ button+button{margin-top:9px}
    Zorvix arranca en cero: todo lo que exista entra por aquí.
    ================================================================= */
 
-var CFG_KEY = 'msu_alm_cfg';
+/* La URL del gateway no es secreto: sin una sesión válida no responde nada.
+   Vivir aquí es lo que permite que la app abra directo en Google, sin
+   pantalla de configuración en cada teléfono. */
+var GATEWAY = 'https://script.google.com/macros/s/AKfycbz0VFVwemsK8M2_nqwp-0zMcGuhicVCn5xIwlG1hPAaEnvh7XUdxwvX5AhrhAje3sRggg/exec';
+
 var COLA_KEY = 'msu_alm_cola';
 var SES_KEY = 'msu_alm_sesion';
 var CAT_KEY = 'msu_alm_cat';
 
 var estado = {
-  cfg: leer(CFG_KEY, {}),
   sesion: leer(SES_KEY, null),
   cat: leer(CAT_KEY, null),
   cabecera: null,
@@ -199,17 +202,20 @@ function pintarEstado() {
 
 /* ---------- transporte ---------- */
 async function enviar(payload, sinEncolar) {
-  if (!estado.cfg.gateway) throw new Error('Falta configurar el gateway');
-  payload.token = estado.cfg.token;
   if (!payload.client_id) payload.client_id = idCliente();
-  if (estado.sesion && !payload.usuario) payload.usuario = estado.sesion.usuario;
+  if (estado.sesion && estado.sesion.sesion) payload.sesion = estado.sesion.sesion;
   try {
-    var res = await fetch(estado.cfg.gateway, {
+    var res = await fetch(GATEWAY, {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify(payload)
     });
-    return await res.json();
+    var datos = await res.json();
+    // Si la sesión murió, no tiene caso seguir: se limpia y se pide Google.
+    if (datos && datos.ok === false && MOTIVOS_SESION[datos.error]) {
+      cerrarSesion(MOTIVOS_SESION[datos.error]);
+    }
+    return datos;
   } catch (err) {
     if (!sinEncolar && payload.encolable) { encolar(payload); return { ok: true, encolado: true }; }
     throw err;
@@ -217,27 +223,22 @@ async function enviar(payload, sinEncolar) {
 }
 
 /* =================================================================
-   Configuración y sesión
+   Sesión
    ================================================================= */
-function pantallaConfig(msg) {
-  encabezado('Configuración', 'Primer uso');
-  pintar((msg ? '<div class="aviso a-err">' + esc(msg) + '</div>' : '') +
-    '<div class="card"><h3>Conexión con el sistema</h3>' +
-    '<p class="sub">Se piden una sola vez en cada teléfono.</p>' +
-    '<div class="campo"><label>URL del gateway</label>' +
-    '<input id="cG" type="url" placeholder="https://script.google.com/macros/s/.../exec" value="' + esc(estado.cfg.gateway || '') + '"></div>' +
-    '<div class="campo"><label>Token</label><input id="cT" type="password" value="' + esc(estado.cfg.token || '') + '"></div>' +
-    '<button class="b-primary" id="bG">Probar y guardar</button></div>');
-  $('bG').onclick = async function () {
-    estado.cfg = { gateway: $('cG').value.trim(), token: $('cT').value.trim() };
-    this.disabled = true; this.textContent = 'Probando…';
-    try {
-      var r = await enviar({ accion: 'ping' }, true);
-      if (!r.ok) return pantallaConfig(r.error || 'No se pudo conectar');
-      escribir(CFG_KEY, estado.cfg); pantallaLogin();
-    } catch (e) { pantallaConfig('No se pudo conectar. Revisa la URL y que tengas señal.'); }
-  };
+
+/** La sesión se acabó o la revocaron: limpiar y volver a la puerta. */
+function cerrarSesion(msg) {
+  estado.sesion = null;
+  escribir(SES_KEY, null);
+  pantallaLogin(msg);
 }
+
+var MOTIVOS_SESION = {
+  SIN_SESION:      'Entra con tu cuenta de Google.',
+  SESION_INVALIDA: 'Tu sesión ya no es válida. Vuelve a entrar.',
+  SESION_EXPIRADA: 'Tu sesión caducó. Vuelve a entrar con Google.',
+  SESION_REVOCADA: 'Tu acceso al almacén fue dado de baja. Habla con el director.'
+};
 
 /* ---------- Google Identity ---------- */
 var GIS_LISTO = null;
@@ -257,11 +258,13 @@ function cargarGIS() {
 }
 
 async function entrarConGoogle(credencial) {
-  var r = await enviar({ accion: 'login_google', idToken: credencial }, true);
+  var r = await enviar({ accion: 'login_google', idToken: credencial,
+                         dispositivo: navigator.userAgent }, true);
   if (!r.ok) return pantallaLogin(r.error);
   // La identidad que firma cada movimiento es el correo verificado por Google,
-  // no un nombre escrito a mano.
-  estado.sesion = { usuario: r.correo || r.usuario, nombre: r.nombre, rol: r.rol, via: r.via };
+  // no un nombre escrito a mano. La sesión la emite nuestro backend.
+  estado.sesion = { sesion: r.sesion, usuario: r.correo || r.usuario,
+                    nombre: r.nombre, rol: r.rol, via: r.via };
   escribir(SES_KEY, estado.sesion);
   await cargarCat();
   pantallaInicio();
@@ -274,10 +277,7 @@ function pantallaLogin(msg) {
     '<p class="sub">Entra con la cuenta de Google que tengas dada de alta en el almacén. ' +
     'Cada movimiento queda firmado con ese correo.</p>' +
     '<div id="gBtn" class="g-caja"></div>' +
-    '<div id="gMsg" class="mini"></div>' +
-    '<div class="espacio"></div>' +
-    '<button class="b-ghost" id="bC">Cambiar configuración</button></div>');
-  $('bC').onclick = function () { pantallaConfig(); };
+    '<div id="gMsg" class="mini"></div></div>');
   prepararBotonGoogle();
 }
 
@@ -640,8 +640,7 @@ window.addEventListener('offline', pintarEstado);
 
 (async function inicio() {
   pintarEstado();
-  if (!estado.cfg.gateway) return pantallaConfig();
-  if (!estado.sesion) return pantallaLogin();
+  if (!estado.sesion || !estado.sesion.sesion) return pantallaLogin();
   pantallaInicio();
   try { await cargarCat(); pantallaInicio(); } catch (e) {}
   vaciarCola();
