@@ -343,6 +343,11 @@ function pantallaInicio() {
     '</div>' +
     (cola().length ? '<div class="espacio"></div><button class="b-ghost" id="bReint">Reintentar envío</button>' : '') +
     '</div>' +
+
+    '<div class="card"><h3>Activos fijos</h3>' +
+    '<p class="sub">Equipo, mobiliario y cómputo etiquetados. Misma sesión: no vuelve a pedir Google.</p>' +
+    '<button class="b-dark" id="bActivos">Ir a activos fijos</button></div>' +
+
     '<button class="b-ghost" id="bSalir">Cerrar sesión</button>');
 
   $('bNueva').onclick = function () {
@@ -351,6 +356,7 @@ function pantallaInicio() {
   };
   $('bExist').onclick = function () { pantallaExistencias(); };
   $('bLotes').onclick = function () { pantallaLotes(); };
+  $('bActivos').onclick = function () { location.href = '/activos/'; };
   $('bSalir').onclick = function () { estado.sesion = null; escribir(SES_KEY, null); pantallaLogin(); };
   if ($('bReint')) $('bReint').onclick = async function () {
     this.textContent = 'Enviando…'; await vaciarCola(); pantallaInicio();
