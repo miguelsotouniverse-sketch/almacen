@@ -1,0 +1,25 @@
+{
+  "name": "Almacén · MS Universe",
+  "short_name": "Almacén",
+  "description": "Recepción de compras y existencias",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F4F2F1",
+  "theme_color": "#0C0E0D",
+  "icons": [
+    {
+      "src": "icono-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "icono-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

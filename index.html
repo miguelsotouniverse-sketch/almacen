@@ -1,0 +1,601 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0C0E0D">
+<title>Almacén · MS Universe</title>
+<link rel="manifest" href="manifest.json">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --ground:#F4F2F1;--surface:#FFFFFF;--surface-2:#EDEAE7;
+  --ink:#0C0E0D;--ink-2:#3D423F;--ink-3:#6E736F;
+  --rule:#D8D2CC;--rule-soft:#E6E1DC;
+  --accent:#A19487;--accent-deep:#6B5D51;
+  --ok:#3F6F52;--warn:#B5842B;--crit:#A33F30;--info:#3C5F79;
+  --tint-ok:rgba(63,111,82,.10);--tint-warn:rgba(181,132,43,.13);
+  --tint-crit:rgba(163,63,48,.10);--tint-info:rgba(60,95,121,.10);
+  --tint-accent:rgba(161,148,135,.15);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{background:var(--ground);color:var(--ink);
+  font-family:'Jost',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  font-weight:300;font-size:16px;line-height:1.5;-webkit-font-smoothing:antialiased;
+  padding-bottom:env(safe-area-inset-bottom)}
+.mono{font-family:'IBM Plex Mono',ui-monospace,monospace}
+
+header{position:sticky;top:0;z-index:20;background:var(--ink);color:#F4F2F1;
+  padding:calc(10px + env(safe-area-inset-top)) 16px 10px}
+header .fila{display:flex;justify-content:space-between;align-items:center;gap:10px}
+header .t{font-weight:500;font-size:1.02rem;line-height:1.2}
+header .s{font-family:'IBM Plex Mono',monospace;font-size:.64rem;letter-spacing:.1em;
+  text-transform:uppercase;color:#9AA09C;margin-top:2px}
+.estado{font-family:'IBM Plex Mono',monospace;font-size:.62rem;letter-spacing:.05em;
+  padding:3px 8px;border-radius:3px;background:rgba(255,255,255,.1);white-space:nowrap}
+.estado.pend{background:var(--tint-warn);color:#E0B369}
+.estado.off{background:var(--tint-crit);color:#E4998A}
+
+main{padding:16px 16px 40px;max-width:680px;margin:0 auto}
+h2{font-size:1.15rem;font-weight:500;margin:0 0 12px}
+p{margin:0 0 12px}
+.sub{color:var(--ink-3);font-size:.9rem}
+.mini{font-size:.82rem;color:var(--ink-3)}
+.centro{text-align:center}
+.oculto{display:none!important}
+.espacio{height:10px}
+
+.card{background:var(--surface);border:1px solid var(--rule);border-radius:10px;
+  padding:16px;margin-bottom:14px}
+.card h3{margin:0 0 8px;font-size:1rem;font-weight:500}
+
+label{display:block;font-family:'IBM Plex Mono',monospace;font-size:.64rem;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3);margin:0 0 5px}
+input,select,textarea{width:100%;padding:12px 13px;border:1px solid var(--rule);
+  border-radius:8px;background:var(--surface);color:var(--ink);
+  font-family:inherit;font-size:16px;font-weight:300}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);
+  outline-offset:1px;border-color:var(--accent)}
+.campo{margin-bottom:13px}
+.dos{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+
+button{font-family:inherit;font-size:1rem;font-weight:500;border:0;border-radius:9px;
+  padding:14px;cursor:pointer;width:100%}
+.b-primary{background:var(--accent);color:#15100C}
+.b-dark{background:var(--ink);color:#F4F2F1}
+.b-ghost{background:transparent;border:1px solid var(--rule);color:var(--ink-2)}
+.b-fila{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+button:disabled{opacity:.5}
+button+button{margin-top:9px}
+.b-fila button+button{margin-top:0}
+
+.pill{display:inline-block;font-family:'IBM Plex Mono',monospace;font-size:.62rem;
+  padding:3px 8px;border-radius:3px;letter-spacing:.05em}
+.p-ok{background:var(--tint-ok);color:var(--ok)}
+.p-warn{background:var(--tint-warn);color:var(--warn)}
+.p-crit{background:var(--tint-crit);color:var(--crit)}
+.p-info{background:var(--tint-info);color:var(--info)}
+.p-neutral{background:var(--surface-2);color:var(--ink-3)}
+
+.aviso{padding:12px 14px;border-radius:8px;margin-bottom:14px;font-size:.9rem}
+.a-ok{background:var(--tint-ok);color:var(--ok)}
+.a-err{background:var(--tint-crit);color:var(--crit)}
+.a-info{background:var(--tint-accent);color:var(--accent-deep)}
+
+.lista .item{display:flex;justify-content:space-between;gap:10px;align-items:center;
+  padding:11px 0;border-bottom:1px solid var(--rule-soft)}
+.lista .item:last-child{border-bottom:0}
+.lista .item .l{min-width:0}
+.lista .item .l span{display:block;font-family:'IBM Plex Mono',monospace;
+  font-size:.6rem;color:var(--ink-3);letter-spacing:.06em}
+.lista .item .l div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:210px}
+
+.linea{border:1px solid var(--rule);border-radius:9px;padding:12px 13px;margin-bottom:10px;
+  background:var(--surface)}
+.linea .cab{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;
+  margin-bottom:6px}
+.linea .cab .nm{font-weight:500;font-size:.94rem;line-height:1.25}
+.linea .datos{font-family:'IBM Plex Mono',monospace;font-size:.7rem;color:var(--ink-3);
+  line-height:1.6}
+.linea .quitar{width:auto;padding:5px 10px;font-size:.72rem;background:transparent;
+  border:1px solid var(--rule);color:var(--ink-3);border-radius:6px;flex:0 0 auto}
+
+.folio-lote{background:var(--ink);color:#F4F2F1;border-radius:9px;padding:13px 15px;
+  margin-bottom:9px}
+.folio-lote .n{font-family:'IBM Plex Mono',monospace;font-size:1.15rem;font-weight:600}
+.folio-lote .d{font-size:.8rem;color:#9AA09C;margin-top:3px}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="fila">
+    <div>
+      <div class="t" id="hTitulo">Almacén</div>
+      <div class="s" id="hSub">MS Universe</div>
+    </div>
+    <span class="estado" id="hEstado">—</span>
+  </div>
+</header>
+
+<main id="app"></main>
+
+<script>
+/* =================================================================
+   Almacén MS Universe — recepción de compras y existencias
+   Zorvix arranca en cero: todo lo que exista entra por aquí.
+   ================================================================= */
+
+var CFG_KEY = 'msu_alm_cfg';
+var COLA_KEY = 'msu_alm_cola';
+var SES_KEY = 'msu_alm_sesion';
+var CAT_KEY = 'msu_alm_cat';
+
+var estado = {
+  cfg: leer(CFG_KEY, {}),
+  sesion: leer(SES_KEY, null),
+  cat: leer(CAT_KEY, null),
+  cabecera: null,
+  lineas: []
+};
+
+function leer(k, def) {
+  try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : def; }
+  catch (e) { return def; }
+}
+function escribir(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
+function $(id) { return document.getElementById(id); }
+function pintar(html) { $('app').innerHTML = html; }
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; });
+}
+function idCliente() {
+  return 'c' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+}
+function encabezado(t, s) { $('hTitulo').textContent = t; $('hSub').textContent = s || 'MS Universe'; }
+
+function alertar(msg) {
+  var d = document.createElement('div');
+  d.className = 'aviso a-info';
+  d.textContent = msg;
+  $('app').prepend(d);
+  setTimeout(function () { d.remove(); }, 4000);
+}
+
+/* ---------- cola offline ---------- */
+function cola() { return leer(COLA_KEY, []); }
+function encolar(payload) {
+  var c = cola(); c.push(payload);
+  try { localStorage.setItem(COLA_KEY, JSON.stringify(c)); pintarEstado(); return true; }
+  catch (e) {
+    alertar('El teléfono ya no puede guardar más pendientes. Busca señal antes de seguir.');
+    return false;
+  }
+}
+function quitarDeCola(id) {
+  escribir(COLA_KEY, cola().filter(function (x) { return x.client_id !== id; }));
+  pintarEstado();
+}
+async function vaciarCola() {
+  var p = cola();
+  if (!p.length || !navigator.onLine) return;
+  for (var i = 0; i < p.length; i++) {
+    try {
+      var r = await enviar(p[i], true);
+      if (r && r.ok) quitarDeCola(p[i].client_id); else break;
+    } catch (e) { break; }
+  }
+}
+function pintarEstado() {
+  var e = $('hEstado'), pend = cola().length;
+  if (!navigator.onLine) { e.textContent = '● sin señal'; e.className = 'estado off'; }
+  else if (pend) { e.textContent = '● ' + pend + ' por enviar'; e.className = 'estado pend'; }
+  else { e.textContent = '● en línea'; e.className = 'estado'; }
+}
+
+/* ---------- transporte ---------- */
+async function enviar(payload, sinEncolar) {
+  if (!estado.cfg.gateway) throw new Error('Falta configurar el gateway');
+  payload.token = estado.cfg.token;
+  if (!payload.client_id) payload.client_id = idCliente();
+  if (estado.sesion && !payload.usuario) payload.usuario = estado.sesion.usuario;
+  try {
+    var res = await fetch(estado.cfg.gateway, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify(payload)
+    });
+    return await res.json();
+  } catch (err) {
+    if (!sinEncolar && payload.encolable) { encolar(payload); return { ok: true, encolado: true }; }
+    throw err;
+  }
+}
+
+/* =================================================================
+   Configuración y sesión
+   ================================================================= */
+function pantallaConfig(msg) {
+  encabezado('Configuración', 'Primer uso');
+  pintar((msg ? '<div class="aviso a-err">' + esc(msg) + '</div>' : '') +
+    '<div class="card"><h3>Conexión con el sistema</h3>' +
+    '<p class="sub">Se piden una sola vez en cada teléfono.</p>' +
+    '<div class="campo"><label>URL del gateway</label>' +
+    '<input id="cG" type="url" placeholder="https://script.google.com/macros/s/.../exec" value="' + esc(estado.cfg.gateway || '') + '"></div>' +
+    '<div class="campo"><label>Token</label><input id="cT" type="password" value="' + esc(estado.cfg.token || '') + '"></div>' +
+    '<button class="b-primary" id="bG">Probar y guardar</button></div>');
+  $('bG').onclick = async function () {
+    estado.cfg = { gateway: $('cG').value.trim(), token: $('cT').value.trim() };
+    this.disabled = true; this.textContent = 'Probando…';
+    try {
+      var r = await enviar({ accion: 'ping' }, true);
+      if (!r.ok) return pantallaConfig(r.error || 'No se pudo conectar');
+      escribir(CFG_KEY, estado.cfg); pantallaLogin();
+    } catch (e) { pantallaConfig('No se pudo conectar. Revisa la URL y que tengas señal.'); }
+  };
+}
+
+function pantallaLogin(msg) {
+  encabezado('Entrar', 'Almacén');
+  pintar((msg ? '<div class="aviso a-err">' + esc(msg) + '</div>' : '') +
+    '<div class="card">' +
+    '<div class="campo"><label>Usuario</label><input id="lU" autocapitalize="none"></div>' +
+    '<div class="campo"><label>PIN</label><input id="lP" type="password" inputmode="numeric"></div>' +
+    '<button class="b-primary" id="bE">Entrar</button><div class="espacio"></div>' +
+    '<button class="b-ghost" id="bC">Cambiar configuración</button></div>');
+  $('bC').onclick = function () { pantallaConfig(); };
+  $('bE').onclick = async function () {
+    this.disabled = true; this.textContent = 'Entrando…';
+    try {
+      var r = await enviar({ accion: 'login', usuario: $('lU').value.trim(), pin: $('lP').value.trim() }, true);
+      if (!r.ok) return pantallaLogin(r.error);
+      estado.sesion = { usuario: r.usuario, nombre: r.nombre, rol: r.rol };
+      escribir(SES_KEY, estado.sesion);
+      await cargarCat(); pantallaInicio();
+    } catch (e) { pantallaLogin('Sin conexión. Intenta de nuevo.'); }
+  };
+}
+
+async function cargarCat() {
+  try {
+    var r = await enviar({ accion: 'cat_insumos' }, true);
+    if (r && r.ok) { estado.cat = r; escribir(CAT_KEY, r); }
+  } catch (e) { estado.cat = leer(CAT_KEY, null); }
+}
+
+/* =================================================================
+   Inicio
+   ================================================================= */
+function pantallaInicio() {
+  encabezado('Almacén', estado.sesion ? estado.sesion.nombre : '');
+  var c = estado.cat || { catalogo: [], almacenes: [] };
+  pintar(
+    '<div class="card"><h3>Recepción de compra</h3>' +
+    '<p class="sub">Todo lo que entra al almacén pasa por aquí. Cada renglón crea un lote con su folio, su caducidad y su costo.</p>' +
+    '<button class="b-primary" id="bNueva">Nueva recepción</button></div>' +
+
+    '<div class="card"><h3>Consulta</h3>' +
+    '<div class="b-fila">' +
+    '<button class="b-dark" id="bExist">Existencias</button>' +
+    '<button class="b-ghost" id="bLotes">Últimos lotes</button></div></div>' +
+
+    '<div class="card"><div class="lista">' +
+    '<div class="item"><div class="l"><div>SKU en catálogo</div></div><span class="pill p-neutral">' + c.catalogo.length + '</span></div>' +
+    '<div class="item"><div class="l"><div>Almacenes activos</div></div><span class="pill p-neutral">' + c.almacenes.length + '</span></div>' +
+    '<div class="item"><div class="l"><div>Pendientes por enviar</div></div><span class="pill ' + (cola().length ? 'p-warn' : 'p-neutral') + '">' + cola().length + '</span></div>' +
+    '</div>' +
+    (cola().length ? '<div class="espacio"></div><button class="b-ghost" id="bReint">Reintentar envío</button>' : '') +
+    '</div>' +
+    '<button class="b-ghost" id="bSalir">Cerrar sesión</button>');
+
+  $('bNueva').onclick = function () {
+    if (!c.almacenes.length) return alertar('No hay almacenes activos. Revisa la hoja UBICACIONES.');
+    pantallaCabecera();
+  };
+  $('bExist').onclick = function () { pantallaExistencias(); };
+  $('bLotes').onclick = function () { pantallaLotes(); };
+  $('bSalir').onclick = function () { estado.sesion = null; escribir(SES_KEY, null); pantallaLogin(); };
+  if ($('bReint')) $('bReint').onclick = async function () {
+    this.textContent = 'Enviando…'; await vaciarCola(); pantallaInicio();
+  };
+  pintarEstado();
+}
+
+/* =================================================================
+   Recepción — paso 1: cabecera
+   ================================================================= */
+function hoyISO() {
+  var d = new Date();
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' +
+         String(d.getDate()).padStart(2, '0');
+}
+
+function pantallaCabecera() {
+  encabezado('Nueva recepción', 'Datos de la compra');
+  var c = estado.cat;
+  var cab = estado.cabecera || {};
+  var optAlm = c.almacenes.map(function (a) {
+    return '<option value="' + esc(a.id) + '"' + (cab.almacen === a.id ? ' selected' : '') + '>' + esc(a.nombre) + '</option>';
+  }).join('');
+  var optComp = (c.comprobantes || []).map(function (x) {
+    return '<option' + (cab.comprobante === x ? ' selected' : '') + '>' + esc(x) + '</option>';
+  }).join('');
+  var provs = (c.proveedores || []).map(function (p) {
+    return '<option value="' + esc(p) + '">'; }).join('');
+
+  pintar(
+    '<div class="card">' +
+    '<div class="campo"><label>Almacén que recibe</label><select id="kAlm">' + optAlm + '</select></div>' +
+    '<div class="campo"><label>Fecha de recepción</label><input id="kFecha" type="date" value="' + esc(cab.fecha || hoyISO()) + '"></div>' +
+    '<div class="campo"><label>Proveedor</label><input id="kProv" list="lprov" value="' + esc(cab.proveedor || '') + '">' +
+    '<datalist id="lprov">' + provs + '</datalist></div>' +
+    '<div class="dos">' +
+    '<div class="campo"><label>Comprobante</label><select id="kComp">' + optComp + '</select></div>' +
+    '<div class="campo"><label>Folio fiscal</label><input id="kFolio" placeholder="UUID" value="' + esc(cab.folio_fiscal || '') + '"></div>' +
+    '</div>' +
+    '<p class="mini">Si la factura llega después, elige PENDIENTE y captura el folio cuando la tengas. El material entra igual: lo que existe físicamente siempre está en el sistema.</p>' +
+    '</div>' +
+    '<button class="b-primary" id="bSig">Continuar a los renglones</button>' +
+    '<button class="b-ghost" id="bCanc">Cancelar</button>');
+
+  $('bCanc').onclick = function () { estado.cabecera = null; estado.lineas = []; pantallaInicio(); };
+  $('bSig').onclick = function () {
+    estado.cabecera = {
+      almacen: $('kAlm').value, fecha: $('kFecha').value,
+      proveedor: $('kProv').value.trim(), comprobante: $('kComp').value,
+      folio_fiscal: $('kFolio').value.trim()
+    };
+    if (!estado.cabecera.proveedor) return alertar('Falta el proveedor.');
+    pantallaLineas();
+  };
+}
+
+/* =================================================================
+   Recepción — paso 2: renglones (uno por lote)
+   ================================================================= */
+function pantallaLineas() {
+  encabezado('Renglones', 'Uno por lote, no por producto');
+  var c = estado.cat;
+  var opciones = c.catalogo.map(function (s) {
+    return '<option value="' + esc(s.sku) + '">' + esc(s.sku + ' · ' + s.nombre) + '</option>';
+  }).join('');
+
+  var listaHTML = estado.lineas.map(function (l, i) {
+    return '<div class="linea"><div class="cab"><div>' +
+      '<div class="nm">' + esc(l.nombre) + '</div>' +
+      '<div class="datos">' + esc(l.sku) + ' · lote ' + esc(l.lote_proveedor || '—') +
+      ' · cad ' + esc(l.caducidad || '—') + '<br>' +
+      esc(l.cantidad) + ' ' + esc(l.unidad_base || '') + ' × $' + esc(l.costo_unitario) +
+      (String(l.costo_fiscal) !== String(l.costo_unitario) ? ' (fiscal $' + esc(l.costo_fiscal) + ')' : '') +
+      '</div></div>' +
+      '<button class="quitar" data-i="' + i + '">Quitar</button></div></div>';
+  }).join('');
+
+  pintar(
+    '<div class="card"><h3>Agregar renglón</h3>' +
+    '<p class="mini">Si el mismo producto llega en dos lotes o con dos caducidades, son dos renglones. Es lo único que después permite rastrear qué lote se usó en qué paciente.</p>' +
+    '<div class="campo"><label>Producto</label>' +
+    '<input id="rSku" list="lsku" placeholder="Escribe o elige el código">' +
+    '<datalist id="lsku">' + opciones + '</datalist></div>' +
+    '<div class="dos">' +
+    '<div class="campo"><label>Lote del fabricante</label><input id="rLote"></div>' +
+    '<div class="campo"><label>Caducidad</label><input id="rCad" type="date"></div>' +
+    '</div>' +
+    '<div class="dos">' +
+    '<div class="campo"><label>Cantidad (unidad base)</label><input id="rCant" type="number" inputmode="decimal" min="0" step="any"></div>' +
+    '<div class="campo"><label>Costo unitario real</label><input id="rCosto" type="number" inputmode="decimal" min="0" step="any"></div>' +
+    '</div>' +
+    '<div class="campo"><label>Costo fiscal (si es distinto)</label><input id="rFiscal" type="number" inputmode="decimal" min="0" step="any" placeholder="Igual al real si lo dejas vacío"></div>' +
+    '<button class="b-dark" id="bAdd">Agregar renglón</button>' +
+    '<div class="espacio"></div>' +
+    '<button class="b-ghost" id="bNuevoSku">El producto no está en el catálogo</button>' +
+    '</div>' +
+
+    (estado.lineas.length
+      ? '<div class="card"><h3>' + estado.lineas.length + ' renglón' + (estado.lineas.length > 1 ? 'es' : '') + ' capturado' + (estado.lineas.length > 1 ? 's' : '') + '</h3>' + listaHTML + '</div>'
+      : '<div class="card"><p class="sub centro">Todavía no hay renglones.</p></div>') +
+
+    '<button class="b-primary" id="bGuardar"' + (estado.lineas.length ? '' : ' disabled') + '>Guardar recepción</button>' +
+    '<button class="b-ghost" id="bAtras">Volver a los datos de la compra</button>');
+
+  $('bAtras').onclick = function () { pantallaCabecera(); };
+  $('bNuevoSku').onclick = function () { pantallaSkuNuevo(); };
+
+  Array.prototype.forEach.call(document.querySelectorAll('.quitar'), function (b) {
+    b.onclick = function () {
+      estado.lineas.splice(parseInt(this.getAttribute('data-i'), 10), 1);
+      pantallaLineas();
+    };
+  });
+
+  $('bAdd').onclick = function () {
+    var sku = $('rSku').value.trim().toUpperCase();
+    var art = null;
+    c.catalogo.forEach(function (s) { if (String(s.sku).toUpperCase() === sku) art = s; });
+    if (!art) return alertar('Ese código no está en el catálogo. Usa el botón de abajo para darlo de alta.');
+
+    var cant = parseFloat($('rCant').value);
+    if (!cant || cant <= 0) return alertar('Falta la cantidad.');
+    var costo = parseFloat($('rCosto').value);
+    if (isNaN(costo)) return alertar('Falta el costo unitario.');
+    var fiscal = $('rFiscal').value === '' ? costo : parseFloat($('rFiscal').value);
+
+    if (art.nivel !== 'N3' && !$('rCad').value) {
+      if (!confirm('Este insumo se controla por lote y no capturaste caducidad. ¿Agregar de todos modos?')) return;
+    }
+
+    estado.lineas.push({
+      sku: art.sku, nombre: art.nombre, unidad_base: art.unidad_base,
+      lote_proveedor: $('rLote').value.trim(), caducidad: $('rCad').value,
+      cantidad: cant, costo_unitario: costo, costo_fiscal: fiscal
+    });
+    pantallaLineas();
+  };
+
+  $('bGuardar').onclick = async function () {
+    this.disabled = true; this.textContent = 'Guardando…';
+    var payload = {
+      accion: 'recepcion_guardar', encolable: true, client_id: idCliente(),
+      cabecera: estado.cabecera, lineas: estado.lineas
+    };
+    try {
+      var r = await enviar(payload);
+      if (r.ok === false) {
+        this.disabled = false; this.textContent = 'Guardar recepción';
+        return alertar(r.error);
+      }
+      if (r.encolado) {
+        estado.cabecera = null; estado.lineas = [];
+        pantallaInicio();
+        return alertar('Guardado en el teléfono. Se enviará al recuperar señal. Los folios de lote se asignan al enviarse.');
+      }
+      pantallaFolios(r);
+    } catch (e) {
+      this.disabled = false; this.textContent = 'Guardar recepción';
+      alertar('No se pudo guardar. Revisa la señal.');
+    }
+  };
+}
+
+function pantallaSkuNuevo() {
+  encabezado('Producto nuevo', 'Alta rápida');
+  var c = estado.cat;
+  var optU = (c.unidades || []).map(function (u) { return '<option>' + esc(u) + '</option>'; }).join('');
+  var optN = (c.niveles || []).map(function (n) {
+    return '<option' + (n === 'N2' ? ' selected' : '') + '>' + esc(n) + '</option>'; }).join('');
+  pintar(
+    '<div class="card">' +
+    '<p class="mini">Alta mínima para no detener la recepción. Los demás campos se completan después en el catálogo.</p>' +
+    '<div class="campo"><label>Código (SKU)</label><input id="nSku" placeholder="SUT-009"></div>' +
+    '<div class="campo"><label>Nombre</label><input id="nNom"></div>' +
+    '<div class="campo"><label>Presentación</label><input id="nPres" placeholder="Sobre, caja de 12…"></div>' +
+    '<div class="dos">' +
+    '<div class="campo"><label>Unidad base</label><select id="nUni">' + optU + '</select></div>' +
+    '<div class="campo"><label>Nivel de control</label><select id="nNiv">' + optN + '</select></div>' +
+    '</div>' +
+    '<p class="mini">La unidad base es en la que se descuenta, no en la que se compra: piezas y no cajas, mililitros y no frascos.</p>' +
+    '</div>' +
+    '<button class="b-primary" id="bAlta">Dar de alta y volver</button>' +
+    '<button class="b-ghost" id="bVolver">Cancelar</button>');
+
+  $('bVolver').onclick = function () { pantallaLineas(); };
+  $('bAlta').onclick = async function () {
+    var sku = $('nSku').value.trim().toUpperCase();
+    if (!sku || !$('nNom').value.trim()) return alertar('Falta el código o el nombre.');
+    this.disabled = true; this.textContent = 'Guardando…';
+    try {
+      var r = await enviar({ accion: 'sku_alta', sku: {
+        sku: sku, nombre: $('nNom').value.trim(), presentacion: $('nPres').value.trim(),
+        unidad_base: $('nUni').value, nivel_control: $('nNiv').value
+      } }, true);
+      if (!r.ok) { this.disabled = false; this.textContent = 'Dar de alta y volver'; return alertar(r.error); }
+      await cargarCat();
+      pantallaLineas();
+      alertar('Producto agregado al catálogo.');
+    } catch (e) {
+      this.disabled = false; this.textContent = 'Dar de alta y volver';
+      alertar('Sin conexión: el alta de un producto nuevo necesita señal.');
+    }
+  };
+}
+
+/* =================================================================
+   Recepción — paso 3: folios para etiquetar
+   ================================================================= */
+function pantallaFolios(r) {
+  encabezado('Recepción guardada', r.recepcion_id || '');
+  estado.cabecera = null; estado.lineas = [];
+  var folios = (r.lotes || []).map(function (l) {
+    return '<div class="folio-lote"><div class="n">' + esc(l.lote_id) + '</div>' +
+      '<div class="d">' + esc(l.sku) + ' · ' + esc(l.cantidad) +
+      (l.caducidad ? ' · caduca ' + esc(l.caducidad) : '') + '</div></div>';
+  }).join('');
+
+  pintar(
+    '<div class="aviso a-ok">Recepción ' + esc(r.recepcion_id) + ' registrada con ' +
+    (r.lotes || []).length + ' lote(s).</div>' +
+    '<div class="card"><h3>Etiqueta estos lotes</h3>' +
+    '<p class="mini">Escribe o pega el folio en cada empaque antes de guardarlo en el anaquel. A partir de aquí, ese folio es la identidad del lote.</p>' +
+    folios + '</div>' +
+    '<button class="b-primary" id="bOtra">Registrar otra recepción</button>' +
+    '<button class="b-ghost" id="bInicio">Volver al inicio</button>');
+
+  $('bOtra').onclick = function () { pantallaCabecera(); };
+  $('bInicio').onclick = function () { pantallaInicio(); };
+}
+
+/* =================================================================
+   Consultas
+   ================================================================= */
+async function pantallaExistencias() {
+  var c = estado.cat || { almacenes: [] };
+  encabezado('Existencias', 'Derivadas del kardex');
+  pintar('<div class="card"><p class="sub">Cargando…</p></div>');
+  try {
+    var r = await enviar({ accion: 'existencias' }, true);
+    if (!r.ok) return pintar('<div class="aviso a-err">' + esc(r.error) + '</div>');
+    var nombresAlm = {};
+    c.almacenes.forEach(function (a) { nombresAlm[a.id] = a.nombre; });
+
+    var filas = r.existencias.map(function (x) {
+      return '<div class="item"><div class="l"><span>' + esc(x.lote_id) + ' · ' +
+        esc(nombresAlm[x.ubic_id] || x.ubic_id) + '</span><div>' + esc(x.nombre) + '</div></div>' +
+        '<span class="pill p-ok mono">' + esc(x.cantidad) + '</span></div>';
+    }).join('');
+
+    pintar('<div class="card"><h3>' + r.existencias.length + ' renglones con existencia</h3>' +
+      '<div class="lista">' + (filas || '<p class="sub centro">El almacén está en cero. Todo lo que entre lo hará por una recepción.</p>') + '</div></div>' +
+      '<button class="b-ghost" id="bV">Volver</button>');
+    $('bV').onclick = function () { pantallaInicio(); };
+  } catch (e) {
+    pintar('<div class="aviso a-err">Sin conexión.</div><button class="b-ghost" id="bV">Volver</button>');
+    $('bV').onclick = function () { pantallaInicio(); };
+  }
+}
+
+async function pantallaLotes() {
+  encabezado('Últimos lotes', 'Recepciones recientes');
+  pintar('<div class="card"><p class="sub">Cargando…</p></div>');
+  try {
+    var r = await enviar({ accion: 'lotes_recientes', limite: 25 }, true);
+    if (!r.ok) return pintar('<div class="aviso a-err">' + esc(r.error) + '</div>');
+    var filas = r.lotes.map(function (l) {
+      return '<div class="item"><div class="l"><span>' + esc(l.lote_id) + '</span>' +
+        '<div>' + esc(l.sku) + ' · ' + esc(l.proveedor || '—') + '</div></div>' +
+        '<span class="pill ' + (l.comprobante === 'FACTURA' ? 'p-ok' : 'p-warn') + '">' +
+        esc(l.comprobante || '—') + '</span></div>';
+    }).join('');
+    pintar('<div class="card"><h3>Últimos ' + r.lotes.length + ' lotes</h3>' +
+      '<div class="lista">' + (filas || '<p class="sub centro">Todavía no hay lotes.</p>') + '</div></div>' +
+      '<button class="b-ghost" id="bV">Volver</button>');
+    $('bV').onclick = function () { pantallaInicio(); };
+  } catch (e) {
+    pintar('<div class="aviso a-err">Sin conexión.</div><button class="b-ghost" id="bV">Volver</button>');
+    $('bV').onclick = function () { pantallaInicio(); };
+  }
+}
+
+/* =================================================================
+   Arranque
+   ================================================================= */
+window.addEventListener('online', function () { pintarEstado(); vaciarCola(); });
+window.addEventListener('offline', pintarEstado);
+
+(async function inicio() {
+  pintarEstado();
+  if (!estado.cfg.gateway) return pantallaConfig();
+  if (!estado.sesion) return pantallaLogin();
+  pantallaInicio();
+  try { await cargarCat(); pantallaInicio(); } catch (e) {}
+  vaciarCola();
+})();
+
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('sw.js').catch(function () {});
+}
+</script>
+</body>
+</html>
