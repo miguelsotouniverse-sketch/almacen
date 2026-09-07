@@ -403,6 +403,10 @@ function pantallaInicio() {
     (cola().length ? '<div class="espacio"></div><button class="b-ghost" id="bReintentar">Reintentar envío</button>' : '') +
     '</div>' +
 
+    '<div class="card"><h3>Almacén</h3>' +
+    '<p class="sub">Recepción de compras y existencias. Misma sesión: no vuelve a pedir Google.</p>' +
+    '<button class="b-dark" id="bAlmacen">Ir al almacén</button></div>' +
+
     '<button class="b-ghost" id="bSalir">Cerrar sesión</button>'
   );
 
@@ -418,6 +422,7 @@ function pantallaInicio() {
     estado.folio = sig;
     pantallaFicha(null, sig, true);
   };
+  $('bAlmacen').onclick = function () { location.href = '/'; };
   $('bEscanear').onclick = function () { pantallaEscaner(); };
   $('bManual').onclick = function () { pedirFolio(); };
   $('bLista').onclick = function () { pantallaLista(); };
