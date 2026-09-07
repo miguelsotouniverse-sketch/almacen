@@ -1,7 +1,7 @@
 /* Service worker — cachea el armazón de la app para que abra sin señal.
    Los datos NUNCA se cachean: siempre van al gateway o a la cola local. */
 
-var CACHE = 'msu-almacen-v1';
+var CACHE = 'msu-almacen-v2';
 var ARCHIVOS = ['./', './index.html', './manifest.json'];
 var OPCIONALES = [];
 
@@ -30,8 +30,9 @@ self.addEventListener('activate', function (e) {
 self.addEventListener('fetch', function (e) {
   var url = new URL(e.request.url);
 
-  // Nunca interceptar llamadas al backend ni peticiones que no sean GET
-  if (e.request.method !== 'GET' || url.hostname.indexOf('script.google.com') !== -1) {
+  // Nunca interceptar lo que no sea GET, ni nada de otro origen: el backend,
+  // y sobre todo el script de Google Identity, tienen que ir directo a la red.
+  if (e.request.method !== 'GET' || url.origin !== self.location.origin) {
     return;
   }
 

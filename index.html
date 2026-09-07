@@ -45,6 +45,7 @@ p{margin:0 0 12px}
 .centro{text-align:center}
 .oculto{display:none!important}
 .espacio{height:10px}
+.g-caja{display:flex;justify-content:center;margin:16px 0 8px;min-height:44px}
 
 .card{background:var(--surface);border:1px solid var(--rule);border-radius:10px;
   padding:16px;margin-bottom:14px}
@@ -238,25 +239,78 @@ function pantallaConfig(msg) {
   };
 }
 
+/* ---------- Google Identity ---------- */
+var GIS_LISTO = null;
+
+function cargarGIS() {
+  if (GIS_LISTO) return GIS_LISTO;
+  GIS_LISTO = new Promise(function (ok, falla) {
+    if (window.google && google.accounts && google.accounts.id) return ok();
+    var s = document.createElement('script');
+    s.src = 'https://accounts.google.com/gsi/client';
+    s.async = true; s.defer = true;
+    s.onload = function () { ok(); };
+    s.onerror = function () { GIS_LISTO = null; falla(new Error('No se pudo cargar Google')); };
+    document.head.appendChild(s);
+  });
+  return GIS_LISTO;
+}
+
+async function entrarConGoogle(credencial) {
+  var r = await enviar({ accion: 'login_google', idToken: credencial }, true);
+  if (!r.ok) return pantallaLogin(r.error);
+  // La identidad que firma cada movimiento es el correo verificado por Google,
+  // no un nombre escrito a mano.
+  estado.sesion = { usuario: r.correo || r.usuario, nombre: r.nombre, rol: r.rol, via: r.via };
+  escribir(SES_KEY, estado.sesion);
+  await cargarCat();
+  pantallaInicio();
+}
+
 function pantallaLogin(msg) {
   encabezado('Entrar', 'Almacén');
   pintar((msg ? '<div class="aviso a-err">' + esc(msg) + '</div>' : '') +
     '<div class="card">' +
-    '<div class="campo"><label>Usuario</label><input id="lU" autocapitalize="none"></div>' +
-    '<div class="campo"><label>PIN</label><input id="lP" type="password" inputmode="numeric"></div>' +
-    '<button class="b-primary" id="bE">Entrar</button><div class="espacio"></div>' +
+    '<p class="sub">Entra con la cuenta de Google que tengas dada de alta en el almacén. ' +
+    'Cada movimiento queda firmado con ese correo.</p>' +
+    '<div id="gBtn" class="g-caja"></div>' +
+    '<div id="gMsg" class="mini"></div>' +
+    '<div class="espacio"></div>' +
     '<button class="b-ghost" id="bC">Cambiar configuración</button></div>');
   $('bC').onclick = function () { pantallaConfig(); };
-  $('bE').onclick = async function () {
-    this.disabled = true; this.textContent = 'Entrando…';
-    try {
-      var r = await enviar({ accion: 'login', usuario: $('lU').value.trim(), pin: $('lP').value.trim() }, true);
-      if (!r.ok) return pantallaLogin(r.error);
-      estado.sesion = { usuario: r.usuario, nombre: r.nombre, rol: r.rol };
-      escribir(SES_KEY, estado.sesion);
-      await cargarCat(); pantallaInicio();
-    } catch (e) { pantallaLogin('Sin conexión. Intenta de nuevo.'); }
-  };
+  prepararBotonGoogle();
+}
+
+async function prepararBotonGoogle() {
+  var msg = $('gMsg');
+  try {
+    if (!window.isSecureContext) {
+      msg.innerHTML = 'Esta página tiene que abrirse con <b>https://</b> para poder entrar con Google.';
+      return;
+    }
+    var cfg = await enviar({ accion: 'config_publica' }, true);
+    if (!cfg.ok || !cfg.google_activo) {
+      msg.textContent = 'Falta configurar GOOGLE_CLIENT_ID en el gateway.';
+      return;
+    }
+    await cargarGIS();
+    google.accounts.id.initialize({
+      client_id: cfg.google_client_id,
+      callback: function (resp) {
+        $('gMsg').textContent = 'Verificando…';
+        entrarConGoogle(resp.credential).catch(function () {
+          pantallaLogin('Sin conexión. Intenta de nuevo.');
+        });
+      }
+    });
+    google.accounts.id.renderButton($('gBtn'), {
+      theme: 'outline', size: 'large', shape: 'pill',
+      text: 'signin_with', locale: 'es', width: 260
+    });
+    msg.textContent = '';
+  } catch (e) {
+    msg.textContent = 'No se pudo contactar a Google. Revisa tu conexión.';
+  }
 }
 
 async function cargarCat() {
