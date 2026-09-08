@@ -1,7 +1,7 @@
 /* Service worker — cachea el armazón de la app para que abra sin señal.
    Los datos NUNCA se cachean: siempre van al gateway o a la cola local. */
 
-var CACHE = 'msu-almacen-v5';
+var CACHE = 'msu-almacen-v6';
 var ARCHIVOS = ['./', './index.html', './manifest.json'];
 var OPCIONALES = [];
 
