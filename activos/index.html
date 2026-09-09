@@ -108,6 +108,8 @@ button+button{margin-top:9px}
 .lista .item .l span{display:block;font-family:'IBM Plex Mono',monospace;
   font-size:.6rem;color:var(--ink-3);letter-spacing:.06em}
 .lista .item .l div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lista .item-abre{cursor:pointer;margin:0 -6px;padding-left:6px;padding-right:6px;border-radius:6px}
+.lista .item-abre:active{background:var(--surface-2)}
 
 #video{width:100%;border-radius:10px;background:#000;display:block}
 .foto-prev{width:100%;border-radius:8px;margin-top:9px;display:block}
@@ -816,23 +818,55 @@ function fila(k, v) {
 }
 
 /* ---------- lista por ubicación ---------- */
+function nombreEspacio(ubicId) {
+  var c = estado.catalogos || {};
+  var lista = c.ubicaciones || [];
+  for (var i = 0; i < lista.length; i++) {
+    if (lista[i].id === ubicId) return lista[i].nombre;
+  }
+  return ubicId;
+}
+
 async function pantallaLista() {
   if (!estado.ubicActual) return alertar('Primero elige el espacio en el que estás.');
-  encabezado('Inventario del espacio', estado.ubicActual);
+  encabezado('Inventario del espacio', nombreEspacio(estado.ubicActual));
   pintar('<div class="card"><p class="sub">Cargando…</p></div>');
   try {
     var r = await enviar({ accion: 'listar', ubic_id: estado.ubicActual }, true);
     if (!r.ok) return pintar('<div class="aviso a-err">' + esc(r.error) + '</div>');
+
+    /* Cada renglón abre su ficha. Antes la lista era sólo de lectura: se veían
+       los folios pero no había forma de entrar a uno desde aquí. */
     var filas = r.activos.map(function (a) {
-      return '<div class="item"><div class="l"><span>' + esc(a.activo_id) + '</span>' +
+      return '<div class="item item-abre" data-folio="' + esc(a.activo_id) + '">' +
+        '<div class="l"><span>' + esc(a.activo_id) + '</span>' +
         '<div>' + esc(a.nombre) + '</div></div>' +
         '<span class="pill p-neutral">' + esc(a.estado || '—') + '</span></div>';
     }).join('');
+
+    var vacio =
+      '<p class="sub">Todavía no hay nada dado de alta en este espacio.</p>' +
+      '<p class="mini">Si esperabas encontrar algo, revisa arriba que el espacio ' +
+      'elegido sea el correcto: lo que se levantó vive en el espacio donde se dio de alta.</p>';
+
     pintar(
       '<div class="card"><h3>' + r.activos.length + ' activos registrados aquí</h3>' +
-      '<div class="lista">' + (filas || '<p class="sub">Todavía no hay nada.</p>') + '</div></div>' +
+      '<p class="mini">' + esc(nombreEspacio(estado.ubicActual)) + '</p>' +
+      '<div class="lista">' + (filas || vacio) + '</div></div>' +
       '<button class="b-ghost" id="bVolver">Volver</button>'
     );
+
+    Array.prototype.forEach.call(document.querySelectorAll('.item-abre'), function (el) {
+      el.onclick = async function () {
+        var folio = el.getAttribute('data-folio');
+        try {
+          var res = await enviar({ accion: 'resolver', folio: folio }, true);
+          if (res && res.ok && res.activo) pantallaActivo(res.activo);
+          else alertar('No se pudo abrir ' + folio + '.');
+        } catch (e2) { alertar('Sin señal: no se pudo abrir la ficha.'); }
+      };
+    });
+
     $('bVolver').onclick = function () { pantallaInicio(); };
   } catch (e) {
     pintar('<div class="aviso a-err">Sin conexión.</div>' +
