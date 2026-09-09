@@ -246,6 +246,38 @@ async function enviar(payload, sinEncolar) {
   }
 }
 
+/* ---------- fotos ---------- */
+/* La ficha trae foto_id; las fichas viejas sólo traen la liga. Cualquiera
+   de las dos significa que sí hay foto guardada. */
+function tieneFoto(a) {
+  if (!a) return false;
+  if (String(a.foto_id || '').trim()) return true;
+  var u = String(a.foto_url || '').trim();
+  return !!u && u !== 'ERROR_FOTO';
+}
+
+/* Las fotos viven en un Drive privado: ninguna liga directa carga en el
+   teléfono de alguien más. Se piden por el gateway, que ya sabe quién eres. */
+async function cargarFoto(folio, idImagen, idNota, textoFinal) {
+  var img = $(idImagen), nota = $(idNota);
+  if (!img) return;
+  try {
+    var r = await enviar({ accion: 'foto', folio: folio }, true);
+    if (r && r.ok && r.imagen) {
+      img.src = r.imagen;
+      img.classList.remove('oculto');
+      if (nota) {
+        if (textoFinal) nota.textContent = textoFinal;
+        else nota.remove();
+      }
+      return;
+    }
+    if (nota) nota.textContent = (r && r.error) || 'No se pudo cargar la foto.';
+  } catch (e) {
+    if (nota) nota.textContent = 'Sin señal: la foto aparece cuando haya conexión.';
+  }
+}
+
 /* ---------- utilidades de UI ---------- */
 function h(html) { return html; }
 function esc(s) {
@@ -516,7 +548,7 @@ function pantallaFicha(activo, folio, modoLevantamiento) {
     '<div class="campo"><label>Foto</label>' +
     '<input id="fFoto" type="file" accept="image/*" capture="environment">' +
     '<img id="prev" class="foto-prev oculto" alt="">' +
-    (a.foto_url ? '<p class="mini">Ya tiene foto guardada. Si tomas otra, la reemplaza.</p>' : '') +
+    (tieneFoto(a) ? '<p class="mini" id="fotoNota">Cargando la foto guardada…</p>' : '') +
     '</div>' +
 
     '<div class="campo"><label>Notas</label><textarea id="fNotas" rows="2">' + esc(a.notas || '') + '</textarea></div>' +
@@ -527,12 +559,19 @@ function pantallaFicha(activo, folio, modoLevantamiento) {
     '<button class="b-ghost" id="bVolver">Volver al inicio</button>'
   );
 
+  if (tieneFoto(a)) {
+    cargarFoto(a.activo_id || folio, 'prev', 'fotoNota',
+               'Ya tiene foto guardada. Si tomas otra, la reemplaza.');
+  }
+
   $('fFoto').onchange = function () {
     var f = this.files && this.files[0];
     if (!f) return;
     comprimir(f, function (b64) {
       estado.fotoBase64 = b64;
       var img = $('prev'); img.src = b64; img.classList.remove('oculto');
+      var nota = $('fotoNota');
+      if (nota) nota.textContent = 'Foto nueva: reemplaza a la anterior al guardar.';
     });
   };
 
@@ -728,7 +767,10 @@ function pantallaActivo(a) {
     '<div class="folio"><div class="lbl">Folio</div><div class="n">' + esc(a.activo_id) + '</div></div>' +
     '<div class="card">' +
     '<h3>' + esc(a.nombre) + '</h3>' +
-    (a.foto_url && a.foto_url !== 'ERROR_FOTO' ? '<img class="foto-prev" src="' + esc(a.foto_url) + '" alt="">' : '') +
+    (tieneFoto(a)
+      ? '<img class="foto-prev oculto" id="fotoAct" alt="Foto del activo">' +
+        '<p class="mini" id="fotoNota">Cargando foto…</p>'
+      : '') +
     '<div class="lista" style="margin-top:10px">' +
     fila('Categoría', a.categoria) +
     fila('Ubicación', a.ubic_nombre || a.ubic_id) +
@@ -744,6 +786,8 @@ function pantallaActivo(a) {
     '<button class="b-ghost" id="bEditar">Editar ficha</button>' +
     '<button class="b-ghost" id="bVolver">Volver</button>'
   );
+
+  if ($('fotoAct')) cargarFoto(a.activo_id, 'fotoAct', 'fotoNota');
 
   $('bVolver').onclick = function () { pantallaInicio(); };
   $('bEditar').onclick = function () { pantallaFicha(a, a.activo_id, false); };
