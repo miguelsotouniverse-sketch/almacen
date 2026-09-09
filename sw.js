@@ -1,7 +1,8 @@
 /* Service worker — cachea el armazón de la app para que abra sin señal.
    Los datos NUNCA se cachean: siempre van al gateway o a la cola local. */
 
-var CACHE = 'msu-almacen-v6';
+var CACHE = 'msu-almacen-v7';
+var FAMILIA = 'msu-almacen-';
 var ARCHIVOS = ['./', './index.html', './manifest.json'];
 var OPCIONALES = [];
 
@@ -21,7 +22,10 @@ self.addEventListener('activate', function (e) {
   e.waitUntil(
     caches.keys().then(function (claves) {
       return Promise.all(claves.map(function (k) {
-        if (k !== CACHE) return caches.delete(k);
+        /* Sólo se borran las versiones viejas de ESTA app. Las dos apps viven
+           en el mismo dominio: antes cada service worker borraba el caché de
+           la otra al activarse, y se quedaban peleando el almacenamiento. */
+        if (k !== CACHE && k.indexOf(FAMILIA) === 0) return caches.delete(k);
       }));
     }).then(function () { return self.clients.claim(); })
   );
