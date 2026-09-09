@@ -855,8 +855,28 @@ window.addEventListener('offline', pintarEstado);
   vaciarCola();
 })();
 
+/* Registro del service worker con actualización automática.
+   Sin esto, un teléfono se quedaba con la versión vieja de la app hasta que
+   alguien la borrara a mano: se subía un arreglo y no llegaba. Ahora la app
+   busca versión nueva al abrir y cada vez que vuelves a ella, y se recarga
+   sola una sola vez cuando la nueva toma el control. */
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('sw.js').catch(function () {});
+  var habiaControlador = !!navigator.serviceWorker.controller;
+  var recargando = false;
+
+  navigator.serviceWorker.addEventListener('controllerchange', function () {
+    if (!habiaControlador || recargando) return;
+    recargando = true;
+    location.reload();
+  });
+
+  navigator.serviceWorker.register('sw.js').then(function (reg) {
+    var buscar = function () { try { reg.update(); } catch (e) {} };
+    buscar();
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible') buscar();
+    });
+  }).catch(function () {});
 }
 </script>
 </body>
