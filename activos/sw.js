@@ -1,7 +1,7 @@
 /* Service worker — cachea el armazón de la app para que abra sin señal.
    Los datos NUNCA se cachean: siempre van al gateway o a la cola local. */
 
-var CACHE = 'msu-activos-v8';
+var CACHE = 'msu-activos-v9';
 var FAMILIA = 'msu-activos-';
 var ARCHIVOS = ['./', './index.html', './manifest.json'];
 var OPCIONALES = ['./jsQR.js'];   // si no está subido, la instalación no debe fallar

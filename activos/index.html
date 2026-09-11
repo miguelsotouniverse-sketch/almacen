@@ -9,6 +9,61 @@
 <link rel="apple-touch-icon" href="icono-192.png">
 <link rel="icon" type="image/png" href="icono-192.png">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<script>
+/* Red de seguridad, antes que cualquier otra cosa.
+   Si el script principal truena (o ni siquiera se puede leer), la pantalla se
+   quedaba en blanco y desde un telefono no habia forma de saber por que.
+   Esto vive aparte, arriba, para que sobreviva a un error del script grande. */
+(function () {
+  function pinta(txt) {
+    var d = document.getElementById('app') || document.body;
+    if (!d || d.getAttribute('data-fallo')) return;
+    d.setAttribute('data-fallo', '1');
+    d.innerHTML =
+      '<div style="padding:20px;font:16px -apple-system,system-ui,sans-serif;color:#0C0E0D">' +
+      '<p style="font-weight:600;margin:0 0 8px">La app no pudo arrancar.</p>' +
+      '<p style="color:#6E736F;font-size:14px;margin:0 0 18px;word-break:break-word">' +
+      String(txt || '').replace(/[<>&]/g, ' ') + '</p>' +
+      '<p style="margin:0 0 10px"><a href="?reiniciar=1" style="display:block;text-align:center;' +
+      'background:#0C0E0D;color:#F4F2F1;padding:14px;border-radius:9px;text-decoration:none">' +
+      'Reiniciar la app</a></p>' +
+      '<p style="margin:0"><a href="?n=' + Date.now() + '" style="display:block;text-align:center;' +
+      'border:1px solid #D8D2CC;color:#3D423F;padding:14px;border-radius:9px;text-decoration:none">' +
+      'Volver a intentar</a></p></div>';
+  }
+
+  window.addEventListener('error', function (e) {
+    pinta((e.message || 'Error') + (e.filename ? ' (' + e.filename + ':' + e.lineno + ')' : ''));
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    pinta(String((e.reason && e.reason.message) || e.reason || 'Promesa rechazada'));
+  });
+
+  /* Borron y cuenta nueva: quita el service worker y los caches y recarga.
+     Es el arreglo cuando un telefono se quedo atorado con una version vieja.
+     NO toca la sesion: no hay que volver a entrar con Google. */
+  window.reiniciarApp = function () {
+    var pasos = [];
+    try {
+      if ('serviceWorker' in navigator) {
+        pasos.push(navigator.serviceWorker.getRegistrations().then(function (rs) {
+          return Promise.all(rs.map(function (r) { return r.unregister(); }));
+        }));
+      }
+      if (window.caches) {
+        pasos.push(caches.keys().then(function (ks) {
+          return Promise.all(ks.map(function (k) { return caches.delete(k); }));
+        }));
+      }
+    } catch (err) { /* si algo de esto no existe, igual recargamos */ }
+    Promise.all(pasos).catch(function () {}).then(function () {
+      location.replace(location.pathname + '?n=' + Date.now());
+    });
+  };
+
+  if (/[?&]reiniciar=1/.test(location.search)) window.reiniciarApp();
+})();
+</script>
 <!-- Lector de QR para navegadores sin BarcodeDetector (iPhone/Safari).
      El archivo vive en este mismo repositorio, NO en un CDN, para que el
      inventario no dependa de internet. Si falta, la app avisa y ofrece
@@ -881,13 +936,27 @@ window.addEventListener('online', function () { pintarEstado(); vaciarCola(); })
 window.addEventListener('offline', pintarEstado);
 
 (async function inicio() {
+  try { arrancar(); } catch (e) { pantallaFalloDuro(e); }
+})();
+
+function pantallaFalloDuro(e) {
+  var d = document.getElementById('app');
+  if (!d) return;
+  d.innerHTML =
+    '<div class="aviso a-err">La app no pudo arrancar.</div>' +
+    '<div class="card"><p class="mini">' + esc(String((e && e.message) || e)) + '</p></div>' +
+    '<button class="b-dark" onclick="reiniciarApp()">Reiniciar la app</button>' +
+    '<button class="b-ghost" onclick="location.reload()">Volver a intentar</button>';
+}
+
+async function arrancar() {
   pintarEstado();
   if (!estado.sesion || !estado.sesion.sesion) return pantallaLogin();
   estado.catalogos = leer('msu_activos_cat', null);
   pantallaInicio();
   try { await cargarCatalogos(); pantallaInicio(); } catch (e) {}
   vaciarCola();
-})();
+}
 
 /* Registro del service worker con actualización automática.
    Sin esto, un teléfono se quedaba con la versión vieja de la app hasta que
@@ -898,9 +967,16 @@ if ('serviceWorker' in navigator) {
   var habiaControlador = !!navigator.serviceWorker.controller;
   var recargando = false;
 
+  /* Tope duro: como mucho UNA recarga automatica por sesion de pestana.
+     Sin este tope, si dos service workers se pelean el control la app se
+     recarga sin parar y se ve como una pantalla en blanco que nunca carga. */
+  var yaRecargo = false;
+  try { yaRecargo = sessionStorage.getItem('msu_sw_recarga') === '1'; } catch (e) {}
+
   navigator.serviceWorker.addEventListener('controllerchange', function () {
-    if (!habiaControlador || recargando) return;
+    if (!habiaControlador || recargando || yaRecargo) return;
     recargando = true;
+    try { sessionStorage.setItem('msu_sw_recarga', '1'); } catch (e) {}
     location.reload();
   });
 
