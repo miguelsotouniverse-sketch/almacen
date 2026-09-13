@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0C0E0D">
+<title>Diagnóstico · MS Universe</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{background:#F4F2F1;color:#0C0E0D;
+  font:16px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  padding-bottom:env(safe-area-inset-bottom)}
+header{background:#0C0E0D;color:#F4F2F1;padding:calc(12px + env(safe-area-inset-top)) 16px 12px}
+header b{font-size:1.05rem;display:block}
+header span{font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;color:#9AA09C}
+main{padding:16px;max-width:640px;margin:0 auto}
+.f{display:flex;gap:10px;align-items:flex-start;padding:11px 0;border-bottom:1px solid #E6E1DC}
+.f:last-child{border-bottom:0}
+.i{flex:none;width:22px;font-size:1.05rem;line-height:1.4}
+.k{font-size:.64rem;letter-spacing:.12em;text-transform:uppercase;color:#6E736F}
+.v{word-break:break-word;font-size:.95rem}
+.card{background:#fff;border:1px solid #D8D2CC;border-radius:10px;padding:14px 16px;margin-bottom:14px}
+h2{font-size:1rem;font-weight:600;margin:0 0 4px}
+p.sub{color:#6E736F;font-size:.88rem;margin:0 0 14px}
+button,a.btn{display:block;width:100%;text-align:center;font:inherit;font-weight:500;
+  border:0;border-radius:9px;padding:14px;margin-bottom:9px;cursor:pointer;text-decoration:none}
+.b1{background:#0C0E0D;color:#F4F2F1}
+.b2{background:transparent;border:1px solid #D8D2CC;color:#3D423F}
+#copiado{color:#3F6F52;font-size:.85rem;text-align:center;min-height:20px;margin:0}
+</style>
+</head>
+<body>
+
+<header>
+  <b>Diagnóstico</b>
+  <span>Activos fijos · MS Universe</span>
+</header>
+
+<main>
+  <div class="card">
+    <h2>Qué es esto</h2>
+    <p class="sub">Esta página revisa el teléfono y dice qué está fallando.
+      No cambia nada ni borra tu sesión. Cuando termine, toma una captura de
+      pantalla o toca «Copiar todo» y mándasela al Dr. Soto.</p>
+    <div id="pruebas"></div>
+  </div>
+
+  <button class="b1" id="bCopiar">Copiar todo</button>
+  <p id="copiado"></p>
+  <a class="btn b2" href="/activos/?reiniciar=1">Reiniciar la app de activos</a>
+  <a class="btn b2" href="/?reiniciar=1">Reiniciar la app de almacén</a>
+</main>
+
+<script>
+var GATEWAY = 'https://script.google.com/macros/s/AKfycbz0VFVwemsK8M2_nqwp-0zMcGuhicVCn5xIwlG1hPAaEnvh7XUdxwvX5AhrhAje3sRggg/exec';
+var filas = [];
+
+function fila(icono, clave, valor) {
+  filas.push({ i: icono, k: clave, v: String(valor) });
+  var d = document.getElementById('pruebas');
+  d.innerHTML += '<div class="f"><div class="i">' + icono + '</div>' +
+    '<div><div class="k">' + clave + '</div>' +
+    '<div class="v">' + String(valor).replace(/[<>&]/g, ' ') + '</div></div></div>';
+}
+
+function navegador() {
+  var u = navigator.userAgent;
+  var so = /Android/i.test(u) ? 'Android' :
+           /iPhone|iPad|iPod/i.test(u) ? 'iOS' :
+           /Windows/i.test(u) ? 'Windows' :
+           /Mac OS X/i.test(u) ? 'Mac' : 'otro';
+  var v = (u.match(/(CriOS|Chrome)\/(\d+)/) || [])[2];
+  var nav = v ? 'Chrome ' + v :
+            /Firefox\/(\d+)/.test(u) ? 'Firefox ' + RegExp.$1 :
+            /Version\/(\d+).*Safari/.test(u) ? 'Safari ' + RegExp.$1 : 'desconocido';
+  var sover = (u.match(/Android (\d+)/) || u.match(/OS (\d+)[_\d]* like Mac/) || [])[1] || '?';
+  return { so: so, sover: sover, nav: nav, v: v ? parseInt(v, 10) : 0, ua: u };
+}
+
+function esperar(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+
+function cargaScript(url) {
+  return new Promise(function (res) {
+    var s = document.createElement('script');
+    var listo = false;
+    s.onload = function () { listo = true; res(true); };
+    s.onerror = function () { res(false); };
+    s.src = url;
+    document.head.appendChild(s);
+    setTimeout(function () { if (!listo) res(false); }, 8000);
+  });
+}
+
+(async function correr() {
+  var n = navegador();
+  fila('📱', 'Teléfono', n.so + ' ' + n.sover + ' · ' + n.nav);
+
+  /* Modo en que se abrio: navegador o icono de pantalla de inicio */
+  var pie = window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
+  fila('🔲', 'Cómo se abrió', pie || navigator.standalone ? 'Ícono de pantalla de inicio' : 'Navegador');
+
+  /* Un Chrome demasiado viejo no entiende la app */
+  if (n.v && n.v < 60) fila('❌', 'Versión del navegador', 'Chrome ' + n.v + ' es muy viejo. Hay que actualizarlo.');
+  else if (n.v) fila('✅', 'Versión del navegador', 'Suficientemente nueva');
+
+  /* Internet */
+  fila(navigator.onLine ? '✅' : '❌', 'Internet', navigator.onLine ? 'Con señal' : 'SIN SEÑAL');
+
+  /* Archivo principal de la app */
+  try {
+    var r = await fetch('/activos/index.html?d=' + Date.now(), { cache: 'no-store' });
+    var t = await r.text();
+    var tiene = t.indexOf('__appViva') !== -1;
+    fila(r.status === 200 && tiene ? '✅' : '❌', 'Archivo de la app',
+      'HTTP ' + r.status + ' · ' + Math.round(t.length / 1024) + ' KB · ' +
+      (tiene ? 'versión nueva' : 'VERSIÓN VIEJA'));
+  } catch (e) { fila('❌', 'Archivo de la app', 'No se pudo bajar: ' + e.message); }
+
+  /* Lector de QR */
+  try {
+    var rq = await fetch('/activos/jsQR.js?d=' + Date.now(), { cache: 'no-store' });
+    fila(rq.status === 200 ? '✅' : '❌', 'Lector de QR (jsQR.js)', 'HTTP ' + rq.status);
+  } catch (e) { fila('❌', 'Lector de QR (jsQR.js)', e.message); }
+  fila('ℹ️', 'Lector de QR del sistema', ('BarcodeDetector' in window) ? 'Sí lo trae' : 'No lo trae (usa jsQR)');
+
+  /* Version guardada en el telefono */
+  try {
+    var ks = window.caches ? await caches.keys() : [];
+    fila(ks.length ? '✅' : 'ℹ️', 'Versión guardada en el teléfono', ks.length ? ks.join(', ') : 'ninguna');
+  } catch (e) { fila('⚠️', 'Versión guardada en el teléfono', 'No se pudo leer: ' + e.message); }
+
+  try {
+    var rs = ('serviceWorker' in navigator) ? await navigator.serviceWorker.getRegistrations() : [];
+    fila('ℹ️', 'Service workers', rs.length ? rs.map(function (x) { return x.scope; }).join(' | ') : 'ninguno');
+  } catch (e) { fila('⚠️', 'Service workers', e.message); }
+
+  /* Sesion guardada (NUNCA se muestra el token) */
+  try {
+    var s = localStorage.getItem('msu_alm_sesion');
+    var o = s ? JSON.parse(s) : null;
+    fila(o && o.sesion ? '✅' : '❌', 'Sesión guardada',
+      o && o.sesion ? 'Sí, de ' + (o.correo || o.usuario || 'usuario') : 'NO HAY — pedirá entrar con Google');
+  } catch (e) { fila('❌', 'Sesión guardada', 'localStorage bloqueado: ' + e.message); }
+
+  /* Pendientes sin enviar */
+  try {
+    var c = JSON.parse(localStorage.getItem('msu_activos_cola') || '[]');
+    fila(c.length ? '⚠️' : '✅', 'Capturas sin enviar', c.length ? c.length + ' pendientes' : 'ninguna');
+  } catch (e) { fila('⚠️', 'Capturas sin enviar', e.message); }
+
+  /* Gateway */
+  var t0 = Date.now();
+  try {
+    var rp = await fetch(GATEWAY, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({ accion: 'ping' })
+    });
+    var j = await rp.json();
+    fila(j && j.ok ? '✅' : '❌', 'Conexión con el sistema',
+      (j && j.ok ? 'Responde bien' : 'Respuesta rara') + ' · ' + (Date.now() - t0) + ' ms');
+  } catch (e) {
+    fila('❌', 'Conexión con el sistema', 'NO RESPONDE: ' + e.message);
+  }
+
+  /* Google, que es lo que hace falta para entrar */
+  var g = await cargaScript('https://accounts.google.com/gsi/client');
+  fila(g ? '✅' : '❌', 'Entrada con Google',
+    g ? 'El botón de Google sí carga' : 'NO CARGA — sin esto no se puede entrar');
+
+  /* Camara: solo si el navegador la ofrece, no se pide permiso aqui */
+  fila(navigator.mediaDevices && navigator.mediaDevices.getUserMedia ? '✅' : '❌',
+    'Cámara disponible',
+    navigator.mediaDevices && navigator.mediaDevices.getUserMedia ? 'Sí' : 'El navegador no la ofrece');
+
+  fila('🕐', 'Fecha de la prueba', new Date().toLocaleString());
+  fila('🔎', 'Identificación completa', n.ua);
+})();
+
+/* Errores que ocurran mientras corre la prueba */
+window.addEventListener('error', function (e) {
+  fila('❌', 'Error detectado', (e.message || '') + ' (' + (e.filename || '') + ':' + (e.lineno || '') + ')');
+});
+
+document.getElementById('bCopiar').onclick = function () {
+  var txt = filas.map(function (f) { return f.i + ' ' + f.k + ': ' + f.v; }).join('\n');
+  var ok = function () { document.getElementById('copiado').textContent = 'Copiado. Pégalo en WhatsApp.'; };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(txt).then(ok, function () { manual(txt); });
+  } else { manual(txt); }
+};
+
+function manual(txt) {
+  var a = document.createElement('textarea');
+  a.value = txt;
+  a.style.cssText = 'width:100%;height:220px;margin-top:10px';
+  document.querySelector('main').appendChild(a);
+  a.select();
+  document.getElementById('copiado').textContent =
+    'Selecciona el texto de abajo y cópialo a mano.';
+}
+</script>
+</body>
+</html>
