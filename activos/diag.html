@@ -80,6 +80,16 @@ function navegador() {
 
 function esperar(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
 
+/* Ninguna prueba puede colgarse: si tarda mas de la cuenta, se da por vencida
+   y la pagina sigue. Sin esto, una sola prueba lenta dejaba el diagnostico a
+   medias y no servia para nada. */
+function conLimite(promesa, ms, valorSiTarda) {
+  return Promise.race([
+    promesa,
+    new Promise(function (r) { setTimeout(function () { r(valorSiTarda); }, ms); })
+  ]);
+}
+
 function cargaScript(url) {
   return new Promise(function (res) {
     var s = document.createElement('script');
@@ -151,21 +161,46 @@ function cargaScript(url) {
 
   /* Gateway */
   var t0 = Date.now();
-  try {
-    var rp = await fetch(GATEWAY, {
-      method: 'POST',
-      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-      body: JSON.stringify({ accion: 'ping' })
-    });
-    var j = await rp.json();
-    fila(j && j.ok ? '✅' : '❌', 'Conexión con el sistema',
-      (j && j.ok ? 'Responde bien' : 'Respuesta rara') + ' · ' + (Date.now() - t0) + ' ms');
-  } catch (e) {
-    fila('❌', 'Conexión con el sistema', 'NO RESPONDE: ' + e.message);
+  var ping = fetch(GATEWAY, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ accion: 'ping' })
+  }).then(function (rp) { return rp.json(); })
+    .catch(function (e) { return { __error: e.message }; });
+
+  var j = await conLimite(ping, 60000, { __tardo: true });
+  var seg = Math.round((Date.now() - t0) / 100) / 10;
+
+  if (j && j.__tardo) {
+    fila('❌', 'Conexión con el sistema', 'No contestó en 60 segundos');
+  } else if (j && j.__error) {
+    fila('❌', 'Conexión con el sistema', 'NO RESPONDE: ' + j.__error);
+  } else if (j && j.ok) {
+    /* Google Apps Script se "duerme": la primera petición tras un rato puede
+       tardar muchísimo. Eso se siente como que la app no sirve. */
+    var lento = seg > 8;
+    fila(lento ? '⚠️' : '✅', 'Conexión con el sistema',
+      'Responde · ' + seg + ' segundos' +
+      (lento ? ' — MUY LENTO. La primera vez del día tarda; la segunda ya es rápida.' : ''));
+  } else {
+    fila('⚠️', 'Conexión con el sistema', 'Respuesta rara · ' + seg + ' s');
   }
 
+  /* Segundo intento: separa "estaba dormido" de "de verdad esta lento" */
+  var t1 = Date.now();
+  var ping2 = fetch(GATEWAY, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ accion: 'ping' })
+  }).then(function (rp) { return rp.json(); }).catch(function (e) { return { __error: e.message }; });
+  var j2 = await conLimite(ping2, 30000, { __tardo: true });
+  var seg2 = Math.round((Date.now() - t1) / 100) / 10;
+  fila(j2 && j2.ok && seg2 < 8 ? '✅' : '⚠️', 'Segundo intento',
+    j2 && j2.__tardo ? 'Tampoco contestó' :
+    j2 && j2.__error ? 'Falló: ' + j2.__error : seg2 + ' segundos');
+
   /* Google, que es lo que hace falta para entrar */
-  var g = await cargaScript('https://accounts.google.com/gsi/client');
+  var g = await conLimite(cargaScript('https://accounts.google.com/gsi/client'), 12000, false);
   fila(g ? '✅' : '❌', 'Entrada con Google',
     g ? 'El botón de Google sí carga' : 'NO CARGA — sin esto no se puede entrar');
 
