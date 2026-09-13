@@ -11,11 +11,34 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Jost:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <script>
 /* Red de seguridad, antes que cualquier otra cosa.
-   Si el script principal truena (o ni siquiera se puede leer), la pantalla se
-   quedaba en blanco y desde un telefono no habia forma de saber por que.
-   Esto vive aparte, arriba, para que sobreviva a un error del script grande. */
+   Vive aparte y arriba para que sobreviva a un error del script grande.
+
+   Dos reglas aprendidas a golpes:
+   1. Solo se adueña de la pantalla si la app NUNCA logro pintar nada. Si la
+      app ya esta funcionando, un error suelto no debe borrarle la pantalla al
+      usuario: se avisa discreto abajo y ya.
+   2. Reiniciar SIEMPRE recarga, aunque borrar el service worker se atore.
+      Sin el reloj de abajo, en algunos telefonos "Reiniciar" no hacia nada. */
 (function () {
-  function pinta(txt) {
+  window.__appViva = false;
+
+  function chico(txt) {
+    var v = document.getElementById('msu_avisoErr');
+    if (!v) {
+      v = document.createElement('div');
+      v.id = 'msu_avisoErr';
+      v.style.cssText = 'position:fixed;left:10px;right:10px;bottom:10px;z-index:9999;' +
+        'background:#A33F30;color:#fff;padding:11px 13px;border-radius:9px;' +
+        'font:13px -apple-system,system-ui,sans-serif;box-shadow:0 4px 14px rgba(0,0,0,.25)';
+      (document.body || document.documentElement).appendChild(v);
+    }
+    v.innerHTML = '<span style="word-break:break-word">' +
+      String(txt || '').replace(/[<>&]/g, ' ') + '</span>' +
+      '<a href="?reiniciar=1" style="color:#fff;text-decoration:underline;margin-left:10px;' +
+      'white-space:nowrap">Reiniciar</a>';
+  }
+
+  function grande(txt) {
     var d = document.getElementById('app') || document.body;
     if (!d || d.getAttribute('data-fallo')) return;
     d.setAttribute('data-fallo', '1');
@@ -32,17 +55,28 @@
       'Volver a intentar</a></p></div>';
   }
 
+  function reportar(txt) {
+    if (window.__appViva) chico(txt); else grande(txt);
+  }
+
   window.addEventListener('error', function (e) {
-    pinta((e.message || 'Error') + (e.filename ? ' (' + e.filename + ':' + e.lineno + ')' : ''));
+    reportar((e.message || 'Error') + (e.filename ? ' (' + e.filename + ':' + e.lineno + ')' : ''));
   });
   window.addEventListener('unhandledrejection', function (e) {
-    pinta(String((e.reason && e.reason.message) || e.reason || 'Promesa rechazada'));
+    reportar(String((e.reason && e.reason.message) || e.reason || 'Promesa rechazada'));
   });
 
   /* Borron y cuenta nueva: quita el service worker y los caches y recarga.
-     Es el arreglo cuando un telefono se quedo atorado con una version vieja.
      NO toca la sesion: no hay que volver a entrar con Google. */
   window.reiniciarApp = function () {
+    var yaFue = false;
+    function irse() {
+      if (yaFue) return;
+      yaFue = true;
+      location.replace(location.pathname + '?n=' + Date.now());
+    }
+    setTimeout(irse, 2500);   // pase lo que pase, recarga
+
     var pasos = [];
     try {
       if ('serviceWorker' in navigator) {
@@ -56,12 +90,17 @@
         }));
       }
     } catch (err) { /* si algo de esto no existe, igual recargamos */ }
-    Promise.all(pasos).catch(function () {}).then(function () {
-      location.replace(location.pathname + '?n=' + Date.now());
-    });
+    Promise.all(pasos).catch(function () {}).then(irse);
   };
 
-  if (/[?&]reiniciar=1/.test(location.search)) window.reiniciarApp();
+  if (/[?&]reiniciar=1/.test(location.search)) {
+    document.addEventListener('DOMContentLoaded', function () {
+      var d = document.getElementById('app');
+      if (d) d.innerHTML = '<p style="padding:20px;font:16px -apple-system,system-ui,sans-serif;' +
+        'color:#6E736F">Reiniciando la app…</p>';
+    });
+    window.reiniciarApp();
+  }
 })();
 </script>
 <style>
@@ -213,7 +252,12 @@ function leer(k, def) {
 }
 function escribir(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} }
 function $(id) { return document.getElementById(id); }
-function pintar(html) { $('app').innerHTML = html; }
+function pintar(html) {
+  $('app').innerHTML = html;
+  /* La app logro pintar: de aqui en adelante un error suelto ya no le borra
+     la pantalla al usuario, solo sale el aviso chico de abajo. */
+  window.__appViva = true;
+}
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
     return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; });
