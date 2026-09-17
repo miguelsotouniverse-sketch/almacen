@@ -180,6 +180,7 @@ button+button{margin-top:9px}
 .aviso{padding:12px 14px;border-radius:8px;margin-bottom:14px;font-size:.9rem}
 .a-ok{background:var(--tint-ok);color:var(--ok)}
 .a-err{background:var(--tint-crit);color:var(--crit)}
+.a-warn{background:var(--tint-warn);color:var(--warn)}
 .a-info{background:var(--tint-accent);color:var(--accent-deep)}
 
 .lista .item{display:flex;justify-content:space-between;gap:10px;align-items:center;
@@ -437,6 +438,13 @@ function pantallaInicio() {
     '<p class="sub">Todo lo que entra al almacén pasa por aquí. Cada renglón crea un lote con su folio, su caducidad y su costo.</p>' +
     '<button class="b-primary" id="bNueva">Nueva recepción</button></div>' +
 
+    (etiquetasPendientes().length
+      ? '<div class="card"><h3>Etiquetas sin imprimir</h3>' +
+        '<p class="sub">Hay <b>' + etiquetasPendientes().length + '</b> folio(s) capturados que ' +
+        'todavía no se imprimen. Se imprimen todos juntos en una hoja.</p>' +
+        '<button class="b-dark" id="bEtqPend">Imprimir etiquetas pendientes</button></div>'
+      : '') +
+
     '<div class="card"><h3>Consulta</h3>' +
     '<div class="b-fila">' +
     '<button class="b-dark" id="bExist">Existencias</button>' +
@@ -460,6 +468,7 @@ function pantallaInicio() {
     if (!c.almacenes.length) return alertar('No hay almacenes activos. Revisa la hoja UBICACIONES.');
     pantallaCabecera();
   };
+  if ($('bEtqPend')) $('bEtqPend').onclick = function () { location.href = 'etiquetas.html'; };
   $('bExist').onclick = function () { pantallaExistencias(); };
   $('bLotes').onclick = function () { pantallaLotes(); };
   $('bActivos').onclick = function () { location.href = '/activos/'; };
@@ -534,8 +543,12 @@ function pantallaLineas() {
       '<div class="nm">' + esc(l.nombre) + '</div>' +
       '<div class="datos">' + esc(l.sku) + ' · lote ' + esc(l.lote_proveedor || '—') +
       ' · cad ' + esc(l.caducidad || '—') + '<br>' +
-      esc(l.cantidad) + ' ' + esc(l.unidad_base || '') + ' × $' + esc(l.costo_unitario) +
-      (String(l.costo_fiscal) !== String(l.costo_unitario) ? ' (fiscal $' + esc(l.costo_fiscal) + ')' : '') +
+      esc(l.cantidad) + ' ' + esc(l.unidad_base || '') +
+      (l.costo_unitario === ''
+        ? ' · <b>costo pendiente</b>'
+        : ' × $' + esc(l.costo_unitario) +
+          (String(l.costo_fiscal) !== String(l.costo_unitario)
+            ? ' (fiscal $' + esc(l.costo_fiscal) + ')' : '')) +
       '</div></div>' +
       '<button class="quitar" data-i="' + i + '">Quitar</button></div></div>';
   }).join('');
@@ -552,8 +565,9 @@ function pantallaLineas() {
     '</div>' +
     '<div class="dos">' +
     '<div class="campo"><label>Cantidad (unidad base)</label><input id="rCant" type="number" inputmode="decimal" min="0" step="any"></div>' +
-    '<div class="campo"><label>Costo unitario real</label><input id="rCosto" type="number" inputmode="decimal" min="0" step="any"></div>' +
+    '<div class="campo"><label>Costo unitario real</label><input id="rCosto" type="number" inputmode="decimal" min="0" step="any" placeholder="Déjalo vacío si aún no sabes"></div>' +
     '</div>' +
+    '<p class="mini">Si el proveedor todavía no manda precios, deja el costo vacío. El lote entra igual y queda marcado para costearlo después. Vacío no es cero.</p>' +
     '<div class="campo"><label>Costo fiscal (si es distinto)</label><input id="rFiscal" type="number" inputmode="decimal" min="0" step="any" placeholder="Igual al real si lo dejas vacío"></div>' +
     '<button class="b-dark" id="bAdd">Agregar renglón</button>' +
     '<div class="espacio"></div>' +
@@ -585,9 +599,17 @@ function pantallaLineas() {
 
     var cant = parseFloat($('rCant').value);
     if (!cant || cant <= 0) return alertar('Falta la cantidad.');
-    var costo = parseFloat($('rCosto').value);
-    if (isNaN(costo)) return alertar('Falta el costo unitario.');
-    var fiscal = $('rFiscal').value === '' ? costo : parseFloat($('rFiscal').value);
+    /* El costo puede faltar: se captura hoy y se cuesta cuando llegue la
+       factura. Vacío se manda vacío, no cero, para poder encontrarlo después. */
+    var crudoCosto = $('rCosto').value.trim();
+    var costo = crudoCosto === '' ? '' : parseFloat(crudoCosto);
+    if (costo !== '' && (isNaN(costo) || costo < 0))
+      return alertar('El costo unitario no es un número válido.');
+
+    var crudoFiscal = $('rFiscal').value.trim();
+    var fiscal = crudoFiscal === '' ? costo : parseFloat(crudoFiscal);
+    if (fiscal !== '' && isNaN(fiscal))
+      return alertar('El costo fiscal no es un número válido.');
 
     if (art.nivel !== 'N3' && !$('rCad').value) {
       if (!confirm('Este insumo se controla por lote y no capturaste caducidad. ¿Agregar de todos modos?')) return;
@@ -671,12 +693,72 @@ function pantallaSkuNuevo() {
 /* =================================================================
    Recepción — paso 3: folios para etiquetar
    ================================================================= */
+/* -----------------------------------------------------------------
+   Etiquetas pendientes de imprimir
+   -----------------------------------------------------------------
+   Los folios se dejan en localStorage y la página de etiquetas los
+   recoge; por la URL no caben, una recepción de 30 renglones la trunca
+   el teléfono.
+
+   Se ACUMULAN entre recepciones a propósito: sin impresora térmica se
+   captura todo el pedido y hasta el final se imprime una sola hoja
+   carta. Si cada recepción borrara la anterior, al final solo quedarían
+   las etiquetas de la última y las demás cajas se quedarían sin folio.
+   La lista se vacía a mano desde la pantalla de etiquetas, ya impresas.
+   ----------------------------------------------------------------- */
+var ETQ_KEY = 'msu_alm_etiquetas';
+
+function etiquetasPendientes() {
+  var v = leer(ETQ_KEY, []);
+  return Object.prototype.toString.call(v) === '[object Array]' ? v : [];
+}
+
+function acumularEtiquetas(lotes) {
+  var cat = (estado.cat && estado.cat.catalogo) || [];
+  var nombre = {}, unidad = {};
+  cat.forEach(function (s) {
+    nombre[String(s.sku).toUpperCase()] = s.nombre;
+    unidad[String(s.sku).toUpperCase()] = s.unidad_base;
+  });
+
+  var lista = etiquetasPendientes();
+  var yaHay = {};
+  lista.forEach(function (l) { yaHay[String(l.lote_id).toUpperCase()] = true; });
+
+  (lotes || []).forEach(function (l) {
+    var folio = String(l.lote_id).toUpperCase();
+    if (yaHay[folio]) return;
+    yaHay[folio] = true;
+    var k = String(l.sku).toUpperCase();
+    lista.push({
+      lote_id: l.lote_id,
+      sku: l.sku,
+      nombre: nombre[k] || '',
+      cantidad: l.cantidad,
+      unidad: unidad[k] || '',
+      caducidad: l.caducidad || '',
+      lote_proveedor: l.lote_proveedor || ''
+    });
+  });
+
+  escribir(ETQ_KEY, lista);
+  return lista.length;
+}
+
 function pantallaFolios(r) {
   encabezado('Recepción guardada', r.recepcion_id || '');
   estado.cabecera = null; estado.lineas = [];
+
+  /* Se guardan en la cola de etiquetas apenas se pinta la pantalla, no al
+     apretar el botón: si se van directo a «Registrar otra recepción» estos
+     folios no se pueden perder. */
+  var pendientes = 0;
+  try { pendientes = acumularEtiquetas(r.lotes); } catch (e) {}
+
   var folios = (r.lotes || []).map(function (l) {
     return '<div class="folio-lote"><div class="n">' + esc(l.lote_id) + '</div>' +
       '<div class="d">' + esc(l.sku) + ' · ' + esc(l.cantidad) +
+      (l.lote_proveedor ? ' · lote ' + esc(l.lote_proveedor) : '') +
       (l.caducidad ? ' · caduca ' + esc(l.caducidad) : '') + '</div></div>';
   }).join('');
 
@@ -686,17 +768,17 @@ function pantallaFolios(r) {
     '<div class="card"><h3>Etiqueta estos lotes</h3>' +
     '<p class="mini">Escribe o pega el folio en cada empaque antes de guardarlo en el anaquel. A partir de aquí, ese folio es la identidad del lote.</p>' +
     folios + '</div>' +
+    (pendientes > (r.lotes || []).length
+      ? '<div class="aviso a-warn">Hay <b>' + pendientes + ' etiquetas</b> guardadas sin imprimir, ' +
+        'contando las de las recepciones anteriores. Se imprimen todas juntas.</div>'
+      : '') +
     '<button class="b-primary" id="bEtiquetas">Imprimir etiquetas</button>' +
     '<button class="b-dark" id="bOtra">Registrar otra recepción</button>' +
     '<button class="b-ghost" id="bInicio">Volver al inicio</button>');
 
-  /* Los folios se dejan en localStorage y la página de etiquetas los recoge.
-     Por la URL no caben: una recepción de 30 renglones la trunca el teléfono. */
   $('bEtiquetas').onclick = function () {
     try {
-      escribir('msu_alm_etiquetas', (r.lotes || []).map(function (l) {
-        return { lote_id: l.lote_id, sku: l.sku, cantidad: l.cantidad, caducidad: l.caducidad };
-      }));
+      acumularEtiquetas(r.lotes);
       location.href = 'etiquetas.html';
     } catch (e) {
       alertar('No se pudieron preparar las etiquetas. Los folios están en la hoja LOTES.');
