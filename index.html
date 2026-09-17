@@ -686,8 +686,22 @@ function pantallaFolios(r) {
     '<div class="card"><h3>Etiqueta estos lotes</h3>' +
     '<p class="mini">Escribe o pega el folio en cada empaque antes de guardarlo en el anaquel. A partir de aquí, ese folio es la identidad del lote.</p>' +
     folios + '</div>' +
-    '<button class="b-primary" id="bOtra">Registrar otra recepción</button>' +
+    '<button class="b-primary" id="bEtiquetas">Imprimir etiquetas</button>' +
+    '<button class="b-dark" id="bOtra">Registrar otra recepción</button>' +
     '<button class="b-ghost" id="bInicio">Volver al inicio</button>');
+
+  /* Los folios se dejan en localStorage y la página de etiquetas los recoge.
+     Por la URL no caben: una recepción de 30 renglones la trunca el teléfono. */
+  $('bEtiquetas').onclick = function () {
+    try {
+      escribir('msu_alm_etiquetas', (r.lotes || []).map(function (l) {
+        return { lote_id: l.lote_id, sku: l.sku, cantidad: l.cantidad, caducidad: l.caducidad };
+      }));
+      location.href = 'etiquetas.html';
+    } catch (e) {
+      alertar('No se pudieron preparar las etiquetas. Los folios están en la hoja LOTES.');
+    }
+  };
 
   $('bOtra').onclick = function () { pantallaCabecera(); };
   $('bInicio').onclick = function () { pantallaInicio(); };
