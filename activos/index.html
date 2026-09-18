@@ -79,7 +79,7 @@
 
     var pasos = [];
     try {
-      if ('serviceWorker' in navigator) {
+      if ('serviceWorker' in navigator && navigator.serviceWorker) {
         pasos.push(navigator.serviceWorker.getRegistrations().then(function (rs) {
           return Promise.all(rs.map(function (r) { return r.unregister(); }));
         }));
@@ -1007,7 +1007,7 @@ async function arrancar() {
    alguien la borrara a mano: se subía un arreglo y no llegaba. Ahora la app
    busca versión nueva al abrir y cada vez que vuelves a ella, y se recarga
    sola una sola vez cuando la nueva toma el control. */
-if ('serviceWorker' in navigator) {
+if ('serviceWorker' in navigator && navigator.serviceWorker) {
   var habiaControlador = !!navigator.serviceWorker.controller;
   var recargando = false;
 
