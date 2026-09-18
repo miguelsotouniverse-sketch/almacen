@@ -79,7 +79,7 @@
 
     var pasos = [];
     try {
-      if ('serviceWorker' in navigator) {
+      if ('serviceWorker' in navigator && navigator.serviceWorker) {
         pasos.push(navigator.serviceWorker.getRegistrations().then(function (rs) {
           return Promise.all(rs.map(function (r) { return r.unregister(); }));
         }));
@@ -200,6 +200,15 @@ button+button{margin-top:9px}
   line-height:1.6}
 .linea .quitar{width:auto;padding:5px 10px;font-size:.72rem;background:transparent;
   border:1px solid var(--rule);color:var(--ink-3);border-radius:6px;flex:0 0 auto}
+
+/* Un renglón de la lista que se puede abrir. El área de toque es todo el
+   renglón, no un botoncito: esto se usa de pie y con guantes. */
+.lista .item-abre{cursor:pointer;padding-left:4px;padding-right:4px;
+  border-radius:7px;transition:background .12s}
+.lista .item-abre:active{background:var(--surface-2)}
+.lista .item-abre .l span::after{content:' ›';color:var(--ink-3)}
+
+.linea .dest{margin-top:8px;font-size:.86rem;padding:9px 11px}
 
 .folio-lote{background:var(--ink);color:#F4F2F1;border-radius:9px;padding:13px 15px;
   margin-bottom:9px}
@@ -445,6 +454,10 @@ function pantallaInicio() {
         '<button class="b-dark" id="bEtqPend">Imprimir etiquetas pendientes</button></div>'
       : '') +
 
+    '<div class="card"><h3>Cajas de cirugía</h3>' +
+    '<p class="sub">El material sale del almacén a una caja, va a quirófano y a hospitalización, y regresa. Se descuenta al alta, no antes.</p>' +
+    '<button class="b-dark" id="bCajas">Abrir o ver cajas</button></div>' +
+
     '<div class="card"><h3>Consulta</h3>' +
     '<div class="b-fila">' +
     '<button class="b-dark" id="bExist">Existencias</button>' +
@@ -469,6 +482,7 @@ function pantallaInicio() {
     pantallaCabecera();
   };
   if ($('bEtqPend')) $('bEtqPend').onclick = function () { location.href = 'etiquetas.html'; };
+  $('bCajas').onclick = function () { pantallaCajas(); };
   $('bExist').onclick = function () { pantallaExistencias(); };
   $('bLotes').onclick = function () { pantallaLotes(); };
   $('bActivos').onclick = function () { location.href = '/activos/'; };
@@ -792,6 +806,416 @@ function pantallaFolios(r) {
 /* =================================================================
    Consultas
    ================================================================= */
+/* =================================================================
+   Cajas de cirugía
+   =================================================================
+   Una caja es una ubicación temporal, no una salida. Mientras está
+   abierta, su contenido no está en el anaquel y tampoco está
+   consumido: está en un tercer lugar. Al cerrarla, lo que quedó
+   dentro es el consumo.
+
+        Salió  −  Regresó  =  Consumido
+
+   Nadie captura el consumo. Se cuenta lo que regresa, que es lo que
+   se tiene enfrente, y el resto lo hace la resta.
+   ================================================================= */
+
+function esCaja(id) { return /^CAJA-/i.test(String(id || '')); }
+
+/** Etiqueta grande y legible de un renglón de caja. */
+function filaCaja(l) {
+  var falta = l.en_caja > 0;
+  return '<div class="linea"><div class="cab"><div>' +
+    '<div class="nm">' + esc(l.nombre) + '</div>' +
+    '<div class="datos">' + esc(l.lote_id) +
+      (l.lote_proveedor ? ' · lote ' + esc(l.lote_proveedor) : '') +
+      (l.caducidad ? ' · cad ' + esc(l.caducidad) : '') + '<br>' +
+      'Salió ' + esc(l.salio) + ' · regresó ' + esc(l.regreso) +
+      (l.consumido ? ' · consumido ' + esc(l.consumido) : '') +
+      ' ' + esc(l.unidad || '') +
+    '</div></div>' +
+    '<span class="pill ' + (falta ? 'p-warn' : 'p-neutral') + ' mono">' +
+      esc(l.en_caja) + '</span>' +
+    '</div></div>';
+}
+
+async function pantallaCajas() {
+  encabezado('Cajas de cirugía', 'Abiertas');
+  pintar('<div class="card"><p class="sub">Cargando…</p></div>');
+  var r;
+  try {
+    r = await enviar({ accion: 'caja_lista', estado: 'ABIERTA' }, true);
+  } catch (e) {
+    pintar('<div class="aviso a-err">Sin conexión.</div><button class="b-ghost" id="bV">Volver</button>');
+    return void ($('bV').onclick = function () { pantallaInicio(); });
+  }
+  if (!r.ok) return pintar('<div class="aviso a-err">' + esc(r.error) + '</div>');
+
+  var lista = (r.cajas || []).map(function (c) {
+    var viejo = c.dias !== '' && c.dias >= 4;
+    return '<div class="item item-abre" data-caja="' + esc(c.caja_id) + '">' +
+      '<div class="l"><span>' + esc(c.caja_id) + '</span>' +
+      '<div>' + esc(c.paciente) + ' · ' + esc(c.procedimiento) + '</div></div>' +
+      '<span class="pill ' + (viejo ? 'p-warn' : 'p-neutral') + '">' +
+      (c.dias === '' ? '—' : c.dias + (c.dias === 1 ? ' día' : ' días')) + '</span></div>';
+  }).join('');
+
+  pintar(
+    '<div class="card"><h3>Abrir una caja</h3>' +
+    '<p class="sub">Se abre antes de surtir. El folio que salga es la identidad de esa caja hasta que el paciente se va de alta.</p>' +
+    '<button class="b-primary" id="bNueva">Nueva caja</button></div>' +
+
+    '<div class="card"><h3>' + (r.cajas || []).length + ' caja(s) abierta(s)</h3>' +
+    (lista
+      ? '<p class="mini">Una caja abierta es material fuera del anaquel. Las de cuatro días o más están marcadas.</p><div class="lista">' + lista + '</div>'
+      : '<p class="sub centro">No hay cajas abiertas.</p>') +
+    '</div>' +
+    '<button class="b-ghost" id="bV">Volver</button>');
+
+  Array.prototype.forEach.call(document.querySelectorAll('.item-abre'), function (el) {
+    el.onclick = function () { pantallaCajaDetalle(this.getAttribute('data-caja')); };
+  });
+  $('bNueva').onclick = function () { pantallaCajaNueva(); };
+  $('bV').onclick = function () { pantallaInicio(); };
+}
+
+var PROCEDIMIENTOS = ['Deep Plane', 'Blefaroplastia 4C', 'Rinoplastia', 'Body 360',
+  'Abdominoplastia', 'ECO2', 'Morpheus 8', 'Endolifting', 'Caja de emergencia'];
+
+function pantallaCajaNueva() {
+  var c = estado.cat || { almacenes: [] };
+  encabezado('Nueva caja', 'Antes de surtir');
+
+  pintar(
+    '<div class="card">' +
+    '<div class="campo"><label>Paciente</label><input id="cPac" placeholder="Nombre completo"></div>' +
+    '<div class="campo"><label>Expediente (opcional)</label><input id="cExp"></div>' +
+    '<div class="campo"><label>Procedimiento</label>' +
+    '<input id="cProc" list="lproc" placeholder="Escribe o elige">' +
+    '<datalist id="lproc">' +
+    PROCEDIMIENTOS.map(function (p) { return '<option value="' + esc(p) + '">'; }).join('') +
+    '</datalist></div>' +
+    '<div class="campo"><label>Almacén que surte</label><select id="cAlm">' +
+    c.almacenes.map(function (a) {
+      return '<option value="' + esc(a.id) + '">' + esc(a.nombre) + '</option>';
+    }).join('') + '</select></div>' +
+    '<button class="b-primary" id="bCrear">Abrir la caja</button>' +
+    '<button class="b-ghost" id="bV">Cancelar</button></div>');
+
+  $('bCrear').onclick = async function () {
+    if (!$('cPac').value.trim()) return alertar('Falta el paciente.');
+    if (!$('cProc').value.trim()) return alertar('Falta el procedimiento.');
+    this.disabled = true; this.textContent = 'Abriendo…';
+    try {
+      var r = await enviar({
+        accion: 'caja_abrir',
+        caja: {
+          paciente: $('cPac').value.trim(),
+          paciente_id: $('cExp').value.trim(),
+          procedimiento: $('cProc').value.trim(),
+          almacen: $('cAlm').value
+        }
+      }, true);
+      if (!r.ok) { this.disabled = false; this.textContent = 'Abrir la caja'; return alertar(r.error); }
+      pantallaCajaDetalle(r.caja_id);
+    } catch (e) {
+      this.disabled = false; this.textContent = 'Abrir la caja';
+      alertar('Sin conexión. Abrir una caja necesita señal porque el folio lo da el servidor.');
+    }
+  };
+  $('bV').onclick = function () { pantallaCajas(); };
+}
+
+async function pantallaCajaDetalle(cajaId) {
+  encabezado('Caja', cajaId);
+  pintar('<div class="card"><p class="sub">Cargando…</p></div>');
+  var r;
+  try {
+    r = await enviar({ accion: 'caja_detalle', caja_id: cajaId }, true);
+  } catch (e) {
+    pintar('<div class="aviso a-err">Sin conexión.</div><button class="b-ghost" id="bV">Volver</button>');
+    return void ($('bV').onclick = function () { pantallaCajas(); });
+  }
+  if (!r.ok) return pintar('<div class="aviso a-err">' + esc(r.error) + '</div>');
+
+  estado.cajaActual = r;
+  var k = r.caja;
+  var dentro = r.lineas.filter(function (l) { return l.en_caja > 0; });
+  var cerrada = String(k.estado).toUpperCase() === 'CERRADA';
+
+  pintar(
+    '<div class="card"><h3>' + esc(k.caja_id) + '</h3>' +
+    '<p class="sub">' + esc(k.paciente) + ' · ' + esc(k.procedimiento) + '</p>' +
+    '<div class="lista">' +
+    '<div class="item"><div class="l"><div>Estado</div></div><span class="pill ' +
+      (cerrada ? 'p-neutral' : 'p-ok') + '">' + esc(k.estado) + '</span></div>' +
+    '<div class="item"><div class="l"><div>Abierta hace</div></div><span class="pill ' +
+      (k.dias >= 4 ? 'p-warn' : 'p-neutral') + '">' + esc(k.dias) + ' día(s)</span></div>' +
+    '<div class="item"><div class="l"><div>Renglones en la caja</div></div>' +
+      '<span class="pill p-neutral">' + dentro.length + '</span></div>' +
+    '</div></div>' +
+
+    (cerrada
+      ? '<div class="aviso a-ok">Cerrada el ' + esc(k.cerrada_en) + '.' +
+        (k.notas ? ' ' + esc(k.notas) : '') + '</div>'
+      : '<div class="b-fila">' +
+        '<button class="b-primary" id="bSacar">Sacar material</button>' +
+        '<button class="b-dark" id="bRegresar"' + (dentro.length ? '' : ' disabled') + '>Registrar retorno</button>' +
+        '</div>' +
+        '<button class="b-dark" id="bCerrar"' + (dentro.length ? '' : ' disabled') + '>Cerrar la caja y hacer el corte</button>') +
+
+    '<div class="card"><h3>Contenido</h3>' +
+    (r.lineas.length
+      ? '<p class="mini">La cifra de la derecha es lo que la caja trae encima ahora. Al cerrar, eso es el consumo.</p>' +
+        r.lineas.map(filaCaja).join('')
+      : '<p class="sub centro">La caja está vacía. Empieza por «Sacar material».</p>') +
+    '</div>' +
+
+    '<button class="b-ghost" id="bEtq">Imprimir etiqueta de la caja</button>' +
+    '<button class="b-ghost" id="bV">Volver a las cajas</button>');
+
+  if ($('bSacar')) $('bSacar').onclick = function () { pantallaCajaMover(cajaId, 'SALIDA'); };
+  if ($('bRegresar')) $('bRegresar').onclick = function () { pantallaCajaMover(cajaId, 'RETORNO'); };
+  if ($('bCerrar')) $('bCerrar').onclick = function () { pantallaCajaCerrar(cajaId); };
+
+  /* La etiqueta de la caja usa la misma impresora que las de lote: el QR
+     lleva el folio en texto plano, sin dominio ni nombre de la marca. */
+  $('bEtq').onclick = function () {
+    try {
+      var lista = etiquetasPendientes();
+      var repetida = lista.some(function (x) { return x.lote_id === k.caja_id; });
+      if (!repetida) {
+        lista.push({ lote_id: k.caja_id, sku: k.procedimiento, nombre: k.paciente,
+                     cantidad: '', unidad: '', caducidad: '', lote_proveedor: '' });
+        escribir(ETQ_KEY, lista);
+      }
+      location.href = 'etiquetas.html';
+    } catch (e) { alertar('No se pudo preparar la etiqueta.'); }
+  };
+  $('bV').onclick = function () { pantallaCajas(); };
+}
+
+/**
+ * Sacar del almacén a la caja, o regresar de la caja al almacén.
+ * En los dos casos se elige un LOTE, no un producto: el folio del lote es
+ * lo que después permite decir qué lote se usó en qué paciente.
+ */
+async function pantallaCajaMover(cajaId, sentido) {
+  var esSalida = sentido !== 'RETORNO';
+  encabezado(esSalida ? 'Sacar material' : 'Registrar retorno', cajaId);
+  pintar('<div class="card"><p class="sub">Cargando…</p></div>');
+
+  var caja = (estado.cajaActual && estado.cajaActual.caja) || null;
+  var disponibles = [];
+  try {
+    if (esSalida) {
+      var e = await enviar({ accion: 'existencias', almacen: caja.almacen }, true);
+      if (!e.ok) return pintar('<div class="aviso a-err">' + esc(e.error) + '</div>');
+      disponibles = e.existencias.map(function (x) {
+        return { sku: x.sku, lote_id: x.lote_id, nombre: x.nombre,
+                 caducidad: x.caducidad, disponible: x.cantidad };
+      });
+    } else {
+      disponibles = estado.cajaActual.lineas.filter(function (l) { return l.en_caja > 0; })
+        .map(function (l) {
+          return { sku: l.sku, lote_id: l.lote_id, nombre: l.nombre,
+                   caducidad: l.caducidad, disponible: l.en_caja };
+        });
+    }
+  } catch (err) {
+    pintar('<div class="aviso a-err">Sin conexión.</div><button class="b-ghost" id="bV">Volver</button>');
+    return void ($('bV').onclick = function () { pantallaCajaDetalle(cajaId); });
+  }
+
+  var lineas = [];
+
+  function opciones(filtro) {
+    var f = String(filtro || '').toLowerCase();
+    return disponibles.filter(function (d) {
+      if (!f) return true;
+      return (d.nombre + ' ' + d.sku + ' ' + d.lote_id).toLowerCase().indexOf(f) >= 0;
+    }).slice(0, 120).map(function (d) {
+      return '<option value="' + esc(d.lote_id) + '">' + esc(d.nombre) +
+        ' · ' + esc(d.lote_id) + ' · hay ' + esc(d.disponible) +
+        (d.caducidad ? ' · cad ' + esc(d.caducidad) : '') + '</option>';
+    }).join('');
+  }
+
+  function dibujar() {
+    var capturado = lineas.map(function (l, i) {
+      return '<div class="linea"><div class="cab"><div>' +
+        '<div class="nm">' + esc(l.nombre) + '</div>' +
+        '<div class="datos">' + esc(l.lote_id) + ' · ' + esc(l.cantidad) + '</div>' +
+        '</div><button class="quitar" data-i="' + i + '">Quitar</button></div></div>';
+    }).join('');
+
+    pintar(
+      (disponibles.length ? '' :
+        '<div class="aviso a-warn">' + (esSalida
+          ? 'Ese almacén no tiene existencia. Todo lo que salga tiene que haber entrado antes por una recepción.'
+          : 'La caja no trae nada que regresar.') + '</div>') +
+
+      '<div class="card"><h3>' + (esSalida ? 'Del almacén a la caja' : 'De la caja al almacén') + '</h3>' +
+      '<p class="mini">' + (esSalida
+        ? 'Esto no descuenta nada: el material cambia de lugar, no desaparece. Se descuenta al cerrar la caja.'
+        : 'Lo que regresa vuelve a estar disponible en el anaquel. Lo que no regrese cuenta como consumido.') +
+      '</p>' +
+      '<div class="campo"><label>Buscar</label><input id="mFiltro" placeholder="Nombre, código o folio de lote"></div>' +
+      '<div class="campo"><label>Lote</label><select id="mLote">' + opciones('') + '</select></div>' +
+      '<div class="campo"><label>Cantidad</label><input id="mCant" type="number" inputmode="decimal" min="0" step="any"></div>' +
+      '<button class="b-dark" id="mAdd">Agregar renglón</button></div>' +
+
+      (lineas.length
+        ? '<div class="card"><h3>' + lineas.length + ' renglón(es)</h3>' + capturado + '</div>'
+        : '<div class="card"><p class="sub centro">Todavía no hay renglones.</p></div>') +
+
+      '<button class="b-primary" id="mGuardar"' + (lineas.length ? '' : ' disabled') + '>' +
+      (esSalida ? 'Guardar la salida' : 'Guardar el retorno') + '</button>' +
+      '<button class="b-ghost" id="mVolver">Volver a la caja</button>');
+
+    $('mFiltro').oninput = function () {
+      $('mLote').innerHTML = opciones(this.value);
+    };
+
+    Array.prototype.forEach.call(document.querySelectorAll('.quitar'), function (b) {
+      b.onclick = function () {
+        lineas.splice(parseInt(this.getAttribute('data-i'), 10), 1);
+        dibujar();
+      };
+    });
+
+    $('mAdd').onclick = function () {
+      var folio = $('mLote').value;
+      var d = null;
+      disponibles.forEach(function (x) { if (x.lote_id === folio) d = x; });
+      if (!d) return alertar('Elige un lote de la lista.');
+
+      var cant = parseFloat($('mCant').value);
+      if (!cant || cant <= 0) return alertar('Falta la cantidad.');
+
+      /* Lo que ya se capturó en esta misma pantalla también gasta
+         existencia: si no se suma, se puede pedir dos veces lo mismo. */
+      var yaPedido = 0;
+      lineas.forEach(function (l) { if (l.lote_id === folio) yaPedido += l.cantidad; });
+      if (cant + yaPedido - d.disponible > 0.0001) {
+        return alertar('Solo hay ' + d.disponible + ' de ' + folio +
+          (yaPedido ? ' y ya capturaste ' + yaPedido + '.' : '.'));
+      }
+
+      lineas.push({ sku: d.sku, lote_id: d.lote_id, nombre: d.nombre, cantidad: cant });
+      dibujar();
+    };
+
+    $('mGuardar').onclick = async function () {
+      this.disabled = true; this.textContent = 'Guardando…';
+      try {
+        var r = await enviar({
+          accion: 'caja_mover',
+          caja_id: cajaId,
+          sentido: esSalida ? 'SALIDA' : 'RETORNO',
+          adicional: !!estado.cajaSurtida,
+          lineas: lineas.map(function (l) {
+            return { sku: l.sku, lote_id: l.lote_id, cantidad: l.cantidad };
+          })
+        }, true);
+        if (!r.ok) {
+          this.disabled = false;
+          this.textContent = esSalida ? 'Guardar la salida' : 'Guardar el retorno';
+          return alertar(r.error);
+        }
+        estado.cajaSurtida = true;
+        pantallaCajaDetalle(cajaId);
+      } catch (e) {
+        this.disabled = false;
+        this.textContent = esSalida ? 'Guardar la salida' : 'Guardar el retorno';
+        alertar('Sin conexión. Este movimiento necesita señal porque valida la existencia contra el servidor.');
+      }
+    };
+
+    $('mVolver').onclick = function () { pantallaCajaDetalle(cajaId); };
+  }
+
+  dibujar();
+}
+
+/** El corte. Lo que quedó en la caja es el consumo; aquí solo se clasifica. */
+function pantallaCajaCerrar(cajaId) {
+  var r = estado.cajaActual;
+  if (!r || !r.caja || r.caja.caja_id !== cajaId) return pantallaCajaDetalle(cajaId);
+
+  encabezado('Cerrar la caja', cajaId);
+  var dentro = r.lineas.filter(function (l) { return l.en_caja > 0; });
+  var destinos = {};
+  dentro.forEach(function (l) { destinos[l.sku + '|' + l.lote_id] = l.destino_sugerido; });
+
+  function bloque(l) {
+    var k = l.sku + '|' + l.lote_id;
+    var opt = ['EXCEDENTE', 'INCLUIDO', 'MERMA'].map(function (d) {
+      return '<option value="' + d + '"' + (destinos[k] === d ? ' selected' : '') + '>' +
+        (d === 'EXCEDENTE' ? 'Excedente · se cobra'
+         : d === 'INCLUIDO' ? 'Incluido en el paquete'
+         : 'Merma · no se cobra') + '</option>';
+    }).join('');
+    return '<div class="linea"><div class="cab"><div>' +
+      '<div class="nm">' + esc(l.nombre) + '</div>' +
+      '<div class="datos">' + esc(l.lote_id) + ' · consumo <b>' + esc(l.en_caja) + '</b> ' +
+      esc(l.unidad || '') + (l.facturable ? ' · catálogo: ' + esc(l.facturable) : '') +
+      '</div></div></div>' +
+      '<select class="dest" data-k="' + esc(k) + '">' + opt + '</select></div>';
+  }
+
+  pintar(
+    '<div class="card"><h3>' + dentro.length + ' renglón(es) de consumo</h3>' +
+    '<p class="sub">Esto es lo que salió menos lo que regresó. No se captura: ya está calculado.</p>' +
+    '<p class="mini">El destino viene propuesto por el catálogo — los implantes, energías, hilos y hialurónicos salen como excedente. Cambia solo lo que sea excepción, y marca merma en lo que se echó a perder.</p>' +
+    dentro.map(bloque).join('') + '</div>' +
+
+    '<div class="card"><h3>Nota del cierre</h3>' +
+    '<p class="mini">Si algo no cuadró, escríbelo aquí tal cual. El cierre se puede guardar con una diferencia registrada; lo que no se vale es inventar una cifra para poder avanzar.</p>' +
+    '<textarea id="cNota" rows="3" placeholder="Opcional"></textarea></div>' +
+
+    '<button class="b-primary" id="bOk">Cerrar la caja</button>' +
+    '<button class="b-ghost" id="bV">Volver sin cerrar</button>');
+
+  Array.prototype.forEach.call(document.querySelectorAll('.dest'), function (s) {
+    s.onchange = function () { destinos[this.getAttribute('data-k')] = this.value; };
+  });
+
+  $('bOk').onclick = async function () {
+    if (!confirm('Al cerrar, ' + dentro.length + ' renglón(es) se descuentan contra ' +
+                 r.caja.paciente + '. Esto no se deshace desde la app. ¿Cerrar?')) return;
+    this.disabled = true; this.textContent = 'Cerrando…';
+    try {
+      var res = await enviar({
+        accion: 'caja_cerrar', caja_id: cajaId,
+        destinos: destinos, nota: $('cNota').value.trim()
+      }, true);
+      if (!res.ok) {
+        this.disabled = false; this.textContent = 'Cerrar la caja';
+        return alertar(res.error);
+      }
+      var s = res.resumen || {};
+      pintar('<div class="aviso a-ok">Caja ' + esc(cajaId) + ' cerrada. ' +
+        esc(res.renglones) + ' renglón(es) descontados.</div>' +
+        '<div class="card"><div class="lista">' +
+        '<div class="item"><div class="l"><div>Excedente · se cobra</div></div><span class="pill p-warn">' + esc(s.EXCEDENTE || 0) + '</span></div>' +
+        '<div class="item"><div class="l"><div>Incluido en el paquete</div></div><span class="pill p-neutral">' + esc(s.INCLUIDO || 0) + '</span></div>' +
+        '<div class="item"><div class="l"><div>Merma</div></div><span class="pill p-neutral">' + esc(s.MERMA || 0) + '</span></div>' +
+        '</div></div>' +
+        ((res.negativos && res.negativos.length)
+          ? '<div class="aviso a-err">Hay ' + res.negativos.length +
+            ' renglón(es) con saldo negativo: regresó más de lo que salió. No se descontaron. Avísale al Dr. Soto.</div>'
+          : '') +
+        '<button class="b-dark" id="bCajas">Volver a las cajas</button>');
+      $('bCajas').onclick = function () { pantallaCajas(); };
+    } catch (e) {
+      this.disabled = false; this.textContent = 'Cerrar la caja';
+      alertar('Sin conexión. El cierre necesita señal porque recalcula el consumo en el servidor.');
+    }
+  };
+  $('bV').onclick = function () { pantallaCajaDetalle(cajaId); };
+}
+
 async function pantallaExistencias() {
   var c = estado.cat || { almacenes: [] };
   encabezado('Existencias', 'Derivadas del kardex');
@@ -802,14 +1226,27 @@ async function pantallaExistencias() {
     var nombresAlm = {};
     c.almacenes.forEach(function (a) { nombresAlm[a.id] = a.nombre; });
 
-    var filas = r.existencias.map(function (x) {
+    function fila(x) {
       return '<div class="item"><div class="l"><span>' + esc(x.lote_id) + ' · ' +
         esc(nombresAlm[x.ubic_id] || x.ubic_id) + '</span><div>' + esc(x.nombre) + '</div></div>' +
         '<span class="pill p-ok mono">' + esc(x.cantidad) + '</span></div>';
-    }).join('');
+    }
 
-    pintar('<div class="card"><h3>' + r.existencias.length + ' renglones con existencia</h3>' +
-      '<div class="lista">' + (filas || '<p class="sub centro">El almacén está en cero. Todo lo que entre lo hará por una recepción.</p>') + '</div></div>' +
+    /* El material en cajas abiertas existe, pero no está en el anaquel.
+       Mezclarlo con lo demás es lo que hace comprar de más. */
+    var anaquel = r.existencias.filter(function (x) { return !esCaja(x.ubic_id); });
+    var enCajas = r.existencias.filter(function (x) { return esCaja(x.ubic_id); });
+
+    pintar(
+      '<div class="card"><h3>' + anaquel.length + ' renglones en el anaquel</h3>' +
+      '<div class="lista">' + (anaquel.map(fila).join('') ||
+        '<p class="sub centro">El almacén está en cero. Todo lo que entre lo hará por una recepción.</p>') +
+      '</div></div>' +
+      (enCajas.length
+        ? '<div class="card"><h3>' + enCajas.length + ' renglones en cajas abiertas</h3>' +
+          '<p class="mini">Esto no está disponible para surtir: anda en quirófano o en hospitalización.</p>' +
+          '<div class="lista">' + enCajas.map(fila).join('') + '</div></div>'
+        : '') +
       '<button class="b-ghost" id="bV">Volver</button>');
     $('bV').onclick = function () { pantallaInicio(); };
   } catch (e) {
@@ -873,7 +1310,7 @@ async function arrancar() {
    alguien la borrara a mano: se subía un arreglo y no llegaba. Ahora la app
    busca versión nueva al abrir y cada vez que vuelves a ella, y se recarga
    sola una sola vez cuando la nueva toma el control. */
-if ('serviceWorker' in navigator) {
+if ('serviceWorker' in navigator && navigator.serviceWorker) {
   var habiaControlador = !!navigator.serviceWorker.controller;
   var recargando = false;
 
