@@ -38,6 +38,7 @@ button{
 .b1:disabled,.b2:disabled{opacity:.45;cursor:default}
 
 .formatos{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+.formatos.tres{grid-template-columns:1fr 1fr 1fr}
 .formatos button{margin:0;text-align:left;padding:13px 15px;line-height:1.35;
   background:#fff;border:1px solid #D8D2CC;color:#3D423F}
 .formatos button strong{display:block;font-weight:500;color:#0C0E0D}
@@ -49,29 +50,45 @@ textarea{
   font:15px/1.45 'IBM Plex Mono',ui-monospace,monospace;color:#0C0E0D;background:#fff;
 }
 
-/* ---------- la etiqueta ---------- */
+/* ---------- la etiqueta ----------
+   Todas las medidas salen de estas variables. Cambiar de tamaño de etiqueta
+   es cambiar el bloque de variables, no perseguir números por todo el CSS.
+
+   El QR manda: cada folio ocupa 21 módulos más 2 de zona de silencio por
+   lado = 25. A 17 mm cada módulo mide 0.68 mm; a 13 mm mide 0.52 mm, que
+   sigue siendo el doble del mínimo práctico de una impresora láser. */
 .etiqueta{
-  width:50mm;height:25mm;display:flex;align-items:center;gap:1.5mm;
-  padding:2mm 2.5mm;background:#fff;color:#000;overflow:hidden;
+  --ancho:50mm; --alto:25mm; --pad-v:2mm; --pad-h:2.5mm; --hueco:1.5mm;
+  --qr:17mm; --f-folio:3.2mm; --f-nom:2.5mm; --f-dato:2.3mm; --sep:.5mm;
+
+  width:var(--ancho);height:var(--alto);display:flex;align-items:center;
+  gap:var(--hueco);padding:var(--pad-v) var(--pad-h);
+  background:#fff;color:#000;overflow:hidden;
 }
-/* 17 mm siguen siendo 0.68 mm por módulo: de sobra para cualquier lector,
-   y le dejan al folio el ancho que necesita para no salir cortado. */
-.etiqueta .qr{width:17mm;height:17mm;flex:none}
+/* Etiqueta chica, de 65 por hoja. Cabe todo menos el código del producto:
+   a este tamaño el nombre sirve más que el SKU para casar caja con etiqueta. */
+.etiqueta.chica{
+  --ancho:38mm; --alto:19mm; --pad-v:1.2mm; --pad-h:1.5mm; --hueco:1.2mm;
+  --qr:15mm; --f-folio:2.4mm; --f-nom:2mm; --f-dato:1.9mm; --sep:.3mm;
+}
+.etiqueta.chica .sku{display:none}
+
+.etiqueta .qr{width:var(--qr);height:var(--qr);flex:none}
 .etiqueta .qr svg{display:block;width:100%;height:100%}
 .etiqueta .txt{min-width:0;flex:1}
 .etiqueta .folio{
   font-family:'IBM Plex Mono',ui-monospace,monospace;font-weight:600;
-  font-size:3.2mm;line-height:1.15;letter-spacing:-.02em;white-space:nowrap;
+  font-size:var(--f-folio);line-height:1.15;letter-spacing:-.02em;white-space:nowrap;
 }
 .etiqueta .nom{
-  font-size:2.5mm;font-weight:500;line-height:1.25;margin-top:.8mm;
+  font-size:var(--f-nom);font-weight:500;line-height:1.25;margin-top:.8mm;
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
 .etiqueta .sku{
-  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:2.3mm;
-  line-height:1.3;margin-top:.5mm;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:var(--f-dato);
+  line-height:1.3;margin-top:var(--sep);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
-.etiqueta .cad{font-size:2.3mm;line-height:1.3;margin-top:.3mm;
+.etiqueta .cad{font-size:var(--f-dato);line-height:1.3;margin-top:.3mm;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .etiqueta .cad b{font-weight:600}
 
@@ -106,12 +123,15 @@ textarea{
     <h2 id="titulo">Etiquetas</h2>
     <p class="sub" id="resumen">Cargando…</p>
 
-    <div class="formatos">
+    <div class="formatos tres">
       <button id="bRollo" aria-pressed="true">
-        <strong>Rollo</strong><small>50 × 25 mm, una por página. Impresora térmica.</small>
+        <strong>Rollo · 50 × 25 mm</strong><small>Una por página. Impresora térmica.</small>
       </button>
       <button id="bHoja" aria-pressed="false">
-        <strong>Hoja carta</strong><small>30 por hoja, 3 × 10. Papel adhesivo, se recorta.</small>
+        <strong>Hoja · 50 × 25 mm</strong><small>30 por hoja, 3 × 10.</small>
+      </button>
+      <button id="bChica" aria-pressed="false">
+        <strong>Hoja · 38 × 19 mm</strong><small>65 por hoja, 5 × 13.</small>
       </button>
     </div>
 
@@ -223,12 +243,34 @@ var HOJA =
   '#hojas .etiqueta{break-inside:avoid;page-break-inside:avoid;' +
   'outline:.15mm solid #9C9691;outline-offset:0;border-radius:0}}';
 
+/* Hoja chica: 5 × 13 = 65 por carta, de 38 × 19 mm. */
+var HOJA_CHICA =
+  '@page{size:Letter;margin:12mm}' +
+  '@media print{#hojas{display:grid!important;' +
+  'grid-template-columns:repeat(5,38mm);grid-auto-rows:19mm;gap:0;justify-content:center}' +
+  '#hojas .etiqueta{break-inside:avoid;page-break-inside:avoid;' +
+  'outline:.15mm solid #9C9691;outline-offset:0;border-radius:0}}';
+
+var FORMATOS = {
+  rollo: { css: ROLLO, chica: false, boton: 'bRollo' },
+  hoja:  { css: HOJA,  chica: false, boton: 'bHoja'  },
+  chica: { css: HOJA_CHICA, chica: true, boton: 'bChica' }
+};
+
 var formato = 'rollo';
 
 function aplicarFormato() {
-  document.getElementById('paginado').textContent = (formato === 'rollo') ? ROLLO : HOJA;
-  document.getElementById('bRollo').setAttribute('aria-pressed', formato === 'rollo');
-  document.getElementById('bHoja').setAttribute('aria-pressed', formato === 'hoja');
+  var f = FORMATOS[formato] || FORMATOS.rollo;
+  document.getElementById('paginado').textContent = f.css;
+  Object.keys(FORMATOS).forEach(function (k) {
+    var b = document.getElementById(FORMATOS[k].boton);
+    if (b) b.setAttribute('aria-pressed', k === formato);
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('#hojas .etiqueta'), function (e) {
+    if (f.chica) e.classList.add('chica'); else e.classList.remove('chica');
+  });
+  /* El folio se vuelve a medir: en la etiqueta chica cabe distinto. */
+  ajustarFolios();
 }
 
 /* Un folio cortado es un folio inservible, y el corte no se nota hasta que
@@ -237,10 +279,14 @@ function aplicarFormato() {
 function ajustarFolios() {
   var folios = document.querySelectorAll('#hojas .folio');
   Array.prototype.forEach.call(folios, function (el) {
-    var tam = 3.2;
+    /* Se parte del tamaño que pide el formato, no de uno fijo: la etiqueta
+       chica arranca más abajo y si no, siempre bajaría desde 3.2 mm. */
+    el.style.fontSize = '';
+    var inicial = parseFloat(getComputedStyle(el).getPropertyValue('--f-folio')) || 3.2;
+    var tam = inicial;
     el.style.fontSize = tam + 'mm';
     var vueltas = 0;
-    while (el.scrollWidth > el.clientWidth + 1 && tam > 2 && vueltas < 20) {
+    while (el.scrollWidth > el.clientWidth + 1 && tam > 1.6 && vueltas < 24) {
       tam -= 0.1;
       el.style.fontSize = tam + 'mm';
       vueltas++;
@@ -251,7 +297,7 @@ function ajustarFolios() {
 function pintar() {
   var caja = document.getElementById('hojas');
   caja.innerHTML = lotes.map(etiqueta).join('');
-  ajustarFolios();
+  aplicarFormato();
 
   var n = lotes.length;
   document.getElementById('titulo').textContent =
@@ -266,6 +312,7 @@ function pintar() {
 
 document.getElementById('bRollo').onclick = function () { formato = 'rollo'; aplicarFormato(); };
 document.getElementById('bHoja').onclick = function () { formato = 'hoja'; aplicarFormato(); };
+document.getElementById('bChica').onclick = function () { formato = 'chica'; aplicarFormato(); };
 document.getElementById('bImprimir').onclick = function () { window.print(); };
 
 document.getElementById('bVaciar').onclick = function () {
