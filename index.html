@@ -1408,6 +1408,8 @@ function pantallaCatalogo(filtro) {
   var conFoto = lista.filter(function (s) { return s.tiene_foto; }).length;
   var tope = vistos.slice(0, 60);
 
+  var alertados = lista.filter(function (s) { return s.alerta; });
+
   var filas = tope.map(function (s) {
     return '<button class="fila-sku" data-sku="' + esc(s.sku) + '">' +
       (s.tiene_foto
@@ -1415,6 +1417,8 @@ function pantallaCatalogo(filtro) {
         : '<span class="sin-foto">sin<br>foto</span>') +
       '<span class="t"><span class="n">' + esc(s.nombre) + '</span>' +
       '<span class="c">' + esc(s.sku) + (s.presentacion ? ' · ' + esc(s.presentacion) : '') + '</span></span>' +
+      (s.alerta ? '<span class="pill p-warn">revisar</span>'
+        : (String(s.controlado).toUpperCase() === 'SI' ? '<span class="pill p-neutral">llave</span>' : '')) +
       '</button>';
   }).join('');
 
@@ -1426,6 +1430,13 @@ function pantallaCatalogo(filtro) {
       (conFoto === 0 ? 'ninguno tiene foto todavía'
                      : conFoto + (conFoto === 1 ? ' ya tiene foto' : ' ya tienen foto')) + '.</p>' +
     '</div>' +
+
+    (alertados.length
+      ? '<div class="card"><h3>' + alertados.length + ' por revisar</h3>' +
+        '<p class="sub">Su nombre suena a medicamento controlado y están capturados como si no lo fueran. ' +
+        'El grupo viene impreso en la caja: hay que verlo antes de decidir.</p>' +
+        '<button class="b-dark" id="bAlertas">Ver cuáles son</button></div>'
+      : '') +
 
     '<div class="card">' +
     (tope.length
@@ -1461,7 +1472,53 @@ function pantallaCatalogo(filtro) {
     }).catch(function () {});
   });
 
+  if ($('bAlertas')) $('bAlertas').onclick = function () { pantallaControlados(); };
   $('bV').onclick = function () { pantallaInicio(); };
+}
+
+/* Los insumos que suenan a controlado y no están marcados. Es una lista de
+   trabajo: se entra a cada uno, se ve la caja y se decide. */
+function pantallaControlados() {
+  encabezado('Por revisar', 'Posibles controlados');
+  var lista = ((estado.cat && estado.cat.catalogo) || []).filter(function (s) { return s.alerta; });
+  var marcados = ((estado.cat && estado.cat.catalogo) || [])
+    .filter(function (s) { return String(s.controlado).toUpperCase() === 'SI'; });
+
+  pintar(
+    (lista.length
+      ? '<div class="card"><h3>' + lista.length + ' sin marcar</h3>' +
+        lista.map(function (s) {
+          return '<button class="fila-sku" data-sku="' + esc(s.sku) + '">' +
+            '<span class="t"><span class="n">' + esc(s.nombre) + '</span>' +
+            '<span class="c">' + esc(s.sku) + '</span>' +
+            '<span class="c" style="color:var(--warn);text-transform:none;letter-spacing:0">' +
+            esc(s.alerta) + '</span></span>' +
+            '<span class="pill p-warn">revisar</span></button>';
+        }).join('') + '</div>'
+      : '<div class="card"><p class="sub centro">Ninguno pendiente. Todos los que suenan a controlado ya están marcados.</p></div>') +
+
+    '<div class="card"><h3>' + marcados.length + ' marcados como controlados</h3>' +
+    (marcados.length
+      ? marcados.map(function (s) {
+          return '<button class="fila-sku" data-sku="' + esc(s.sku) + '">' +
+            '<span class="t"><span class="n">' + esc(s.nombre) + '</span>' +
+            '<span class="c">' + esc(s.sku) + ' · nivel ' + esc(s.nivel || '—') + '</span></span>' +
+            '<span class="pill p-neutral">llave</span></button>';
+        }).join('')
+      : '<p class="sub centro">Todavía ninguno.</p>') +
+    '</div>' +
+
+    '<div class="card"><p class="mini">Esta lista es una red de seguridad sobre la captura, no una clasificación legal. ' +
+    'El dato bueno es el grupo impreso en el empaque: I, II o III va como controlado.</p></div>' +
+
+    '<button class="b-ghost" id="bV">Volver al catálogo</button>');
+
+  Array.prototype.forEach.call(document.querySelectorAll('.fila-sku'), function (b) {
+    b.onclick = function () {
+      pantallaSkuFicha(this.getAttribute('data-sku'), pantallaControlados);
+    };
+  });
+  $('bV').onclick = function () { pantallaCatalogo(''); };
 }
 
 function pantallaSkuFicha(sku, volver) {
@@ -1473,6 +1530,11 @@ function pantallaSkuFicha(sku, volver) {
 
   encabezado(art.sku, 'Ficha del insumo');
   var nueva = null;
+  var opt = function (lista, sel) {
+    return lista.map(function (v) {
+      return '<option' + (String(sel).toUpperCase() === v ? ' selected' : '') + '>' + v + '</option>';
+    }).join('');
+  };
 
   pintar(
     '<div class="card">' +
@@ -1481,10 +1543,30 @@ function pantallaSkuFicha(sku, volver) {
     '<div class="item"><div class="l"><div>Código</div></div><span class="pill p-neutral">' + esc(art.sku) + '</span></div>' +
     (art.presentacion ? '<div class="item"><div class="l"><div>Presentación</div></div><span>' + esc(art.presentacion) + '</span></div>' : '') +
     '<div class="item"><div class="l"><div>Se descuenta en</div></div><span>' + esc(art.unidad_base || '—') + '</span></div>' +
-    '<div class="item"><div class="l"><div>Nivel de control</div></div><span class="pill p-neutral">' + esc(art.nivel || '—') + '</span></div>' +
     (String(art.controlado).toUpperCase() === 'SI'
-      ? '<div class="item"><div class="l"><div>Controlado</div></div><span class="pill p-warn">Bajo llave</span></div>' : '') +
+      ? '<div class="item"><div class="l"><div>Controlado</div></div><span class="pill p-warn">Bajo llave y libro de control</span></div>' : '') +
     '</div></div>' +
+
+    (art.alerta
+      ? '<div class="aviso a-warn"><b>Revisa la caja de este producto.</b><br>' + esc(art.alerta) +
+        '<br>Está capturado como <b>no controlado</b>.</div>'
+      : '') +
+
+    '<div class="card"><h3>Clasificación</h3>' +
+    '<p class="mini">El grupo viene impreso en el empaque. Grupo I, II o III va como controlado; del IV para abajo, no.</p>' +
+    '<div class="dos">' +
+    '<div class="campo"><label>¿Controlado?</label><select id="eCtrl">' + opt(['NO','SI'], art.controlado) + '</select></div>' +
+    '<div class="campo"><label>Nivel de conteo</label><select id="eNiv">' + opt(['N1','N2','N3'], art.nivel) + '</select></div>' +
+    '</div>' +
+    '<div class="dos">' +
+    '<div class="campo"><label>¿Multidosis?</label><select id="eMulti">' + opt(['NO','SI'], art.es_multidosis) + '</select></div>' +
+    '<div class="campo"><label>Clase ABC</label><select id="eClase">' + opt(['A','B','C'], art.clase_abc) + '</select></div>' +
+    '</div>' +
+    '<div class="campo"><label>¿Se cobra aparte?</label><select id="eFact">' +
+      opt(['PAQUETE','SIEMPRE','NUNCA'], art.facturable) + '</select></div>' +
+    '<p class="mini" id="eNota">N1 se cuenta pieza por pieza · N2 por lote · N3 por consumo. Un controlado que no es multidosis va en N1: el libro de control pide una línea por ampolleta.</p>' +
+    '<button class="b-primary" id="eGuardar">Guardar clasificación</button>' +
+    '</div>' +
 
     '<div class="card"><h3>Foto</h3>' +
     '<p class="mini" id="fNota">' + (art.tiene_foto ? 'Cargando la foto guardada…' : 'Este insumo todavía no tiene foto.') + '</p>' +
@@ -1533,6 +1615,55 @@ function pantallaSkuFicha(sku, volver) {
     } catch (e) {
       this.disabled = false; this.textContent = 'Guardar esta foto';
       alertar('Sin señal: la foto necesita conexión para guardarse.');
+    }
+  };
+
+  /* Al marcar controlado se propone el nivel que le toca, pero no se cambia
+     solo: el nivel decide cómo se captura en el anaquel y esa es decisión
+     de quien surte, no del sistema. */
+  function proponerNivel() {
+    var ctrl = $('eCtrl').value === 'SI', multi = $('eMulti').value === 'SI';
+    var claseA = $('eClase').value === 'A';
+    var deberia = (!multi && (ctrl || claseA)) ? 'N1' : (multi ? 'N2' : null);
+    var nota = $('eNota');
+    if (deberia && $('eNiv').value !== deberia) {
+      nota.innerHTML = 'Por como quedó, a este insumo le tocaría <b>' + deberia + '</b>. ' +
+        '<a href="#" id="ePonNiv">Ponerlo en ' + deberia + '</a>';
+      $('ePonNiv').onclick = function (ev) {
+        ev.preventDefault(); $('eNiv').value = deberia; proponerNivel();
+      };
+    } else {
+      nota.textContent = 'N1 se cuenta pieza por pieza · N2 por lote · N3 por consumo.';
+    }
+  }
+  ['eCtrl','eMulti','eClase','eNiv'].forEach(function (id) { $(id).onchange = proponerNivel; });
+  proponerNivel();
+
+  $('eGuardar').onclick = async function () {
+    var cambios = {
+      controlado:    $('eCtrl').value,
+      nivel_control: $('eNiv').value,
+      es_multidosis: $('eMulti').value,
+      clase_abc:     $('eClase').value,
+      facturable:    $('eFact').value
+    };
+    this.disabled = true; this.textContent = 'Guardando…';
+    try {
+      var r = await enviar({ accion: 'sku_editar', sku: art.sku, cambios: cambios }, true);
+      if (!r.ok) { this.disabled = false; this.textContent = 'Guardar clasificación'; return alertar(r.error); }
+      /* El catálogo en memoria se actualiza sin volver a bajarlo completo:
+         son 184 renglones y la pantalla ya tiene los valores buenos. */
+      for (var k in cambios) if (cambios.hasOwnProperty(k)) {
+        if (k === 'nivel_control') art.nivel = cambios[k]; else art[k] = cambios[k];
+      }
+      if (cambios.controlado === 'SI') art.alerta = '';
+      this.disabled = false; this.textContent = 'Guardar clasificación';
+      if (r.sin_cambios) return alertar('No había nada que cambiar.');
+      alertar(r.cambios + ' dato(s) guardados en ' + art.sku + '.');
+      pantallaSkuFicha(art.sku, volver);
+    } catch (e) {
+      this.disabled = false; this.textContent = 'Guardar clasificación';
+      alertar('Sin señal: cambiar la clasificación necesita conexión.');
     }
   };
 
