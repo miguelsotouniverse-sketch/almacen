@@ -155,6 +155,15 @@ p{margin:0 0 12px}
   border-right:0;border-top:0;text-align:left;color:inherit;font-family:inherit;
   font-size:1rem;font-weight:300;cursor:pointer}
 .fila-sku:last-child{border-bottom:0}
+.fila-lote{display:flex;align-items:center;gap:11px;padding:11px 0;
+  border-bottom:1px solid var(--rule);width:100%;background:none;border-left:0;
+  border-right:0;border-top:0;text-align:left;color:inherit;font-family:inherit;
+  font-size:1rem;font-weight:300;cursor:pointer}
+.fila-lote:last-of-type{border-bottom:0}
+.fila-lote .t{flex:1;min-width:0;display:block}
+.fila-lote .t .n{display:block;font-size:.88rem}
+.fila-lote .t .c{display:block;font-family:'IBM Plex Mono',monospace;font-size:.64rem;
+  letter-spacing:.05em;color:var(--ink-3);margin-top:3px}
 .fila-sku .t{flex:1;min-width:0;display:block}
 .fila-sku .t .n{display:block;font-size:.93rem;line-height:1.25}
 .fila-sku .t .c{display:block;font-family:'IBM Plex Mono',monospace;font-size:.66rem;
@@ -529,7 +538,9 @@ function pantallaInicio() {
     '<div class="card"><h3>Consulta</h3>' +
     '<div class="b-fila">' +
     '<button class="b-dark" id="bExist">Existencias</button>' +
-    '<button class="b-ghost" id="bLotes">Últimos lotes</button></div></div>' +
+    '<button class="b-ghost" id="bLotes">Lotes y bajas</button></div>' +
+    '<div class="espacio"></div>' +
+    '<button class="b-ghost" id="bSinFecha">Folios sin caducidad</button></div>' +
 
     '<div class="card"><div class="lista">' +
     '<div class="item"><div class="l"><div>SKU en catálogo</div></div><span class="pill p-neutral">' + c.catalogo.length + '</span></div>' +
@@ -554,6 +565,7 @@ function pantallaInicio() {
   $('bCajas').onclick = function () { pantallaCajas(); };
   $('bExist').onclick = function () { pantallaExistencias(); };
   $('bLotes').onclick = function () { pantallaLotes(); };
+  $('bSinFecha').onclick = function () { pantallaSinFecha(); };
   $('bActivos').onclick = function () { location.href = '/activos/'; };
   $('bSalir').onclick = function () { estado.sesion = null; escribir(SES_KEY, null); pantallaLogin(); };
   if ($('bReint')) $('bReint').onclick = async function () {
@@ -1368,14 +1380,195 @@ async function pantallaLotes() {
     var r = await enviar({ accion: 'lotes_recientes', limite: 25 }, true);
     if (!r.ok) return pintar('<div class="aviso a-err">' + esc(r.error) + '</div>');
     var filas = r.lotes.map(function (l) {
-      return '<div class="item"><div class="l"><span>' + esc(l.lote_id) + '</span>' +
-        '<div>' + esc(l.sku) + ' · ' + esc(l.proveedor || '—') + '</div></div>' +
+      return '<button class="fila-lote" data-lote="' + esc(l.lote_id) + '">' +
+        '<span class="t"><span class="n mono">' + esc(l.lote_id) + '</span>' +
+        '<span class="c">' + esc(l.sku) + ' · ' + esc(l.proveedor || '—') +
+        (l.caducidad ? ' · cad ' + esc(l.caducidad) : ' · SIN CADUCIDAD') + '</span></span>' +
         '<span class="pill ' + (l.comprobante === 'FACTURA' ? 'p-ok' : 'p-warn') + '">' +
-        esc(l.comprobante || '—') + '</span></div>';
+        esc(l.comprobante || '—') + '</span></button>';
     }).join('');
     pintar('<div class="card"><h3>Últimos ' + r.lotes.length + ' lotes</h3>' +
-      '<div class="lista">' + (filas || '<p class="sub centro">Todavía no hay lotes.</p>') + '</div></div>' +
+      '<p class="mini">Toca un folio para corregir su caducidad o darlo de baja.</p>' +
+      (filas || '<p class="sub centro">Todavía no hay lotes.</p>') + '</div>' +
       '<button class="b-ghost" id="bV">Volver</button>');
+    Array.prototype.forEach.call(document.querySelectorAll('.fila-lote'), function (b) {
+      b.onclick = function () { pantallaLote(this.getAttribute('data-lote'), pantallaLotes); };
+    });
+    $('bV').onclick = function () { pantallaInicio(); };
+  } catch (e) {
+    pintar('<div class="aviso a-err">Sin conexión.</div><button class="b-ghost" id="bV">Volver</button>');
+    $('bV').onclick = function () { pantallaInicio(); };
+  }
+}
+
+
+/* =================================================================
+   Ficha del lote — corregir caducidad y dar de baja
+   =================================================================
+   La caducidad y el lote del fabricante describen al lote: se corrigen en
+   su lugar. La cantidad no: baja porque el material se movió a residuos,
+   nunca porque alguien editó un número.
+   ================================================================= */
+async function pantallaLote(loteId, volver) {
+  encabezado(loteId, 'Ficha del lote');
+  pintar('<div class="card"><p class="sub">Cargando…</p></div>');
+  var art = null, ex = [];
+  try {
+    var r = await enviar({ accion: 'existencias' }, true);
+    if (!r.ok) return pintar('<div class="aviso a-err">' + esc(r.error) + '</div>');
+    ex = (r.existencias || []).filter(function (x) {
+      return String(x.lote_id).toUpperCase() === String(loteId).toUpperCase();
+    });
+  } catch (e) {
+    pintar('<div class="aviso a-err">Sin conexión. La ficha del lote necesita señal.</div>' +
+           '<button class="b-ghost" id="bV">Volver</button>');
+    $('bV').onclick = function () { (volver || pantallaLotes)(); };
+    return;
+  }
+
+  var uno = ex[0] || {};
+  ((estado.cat && estado.cat.catalogo) || []).forEach(function (s) {
+    if (String(s.sku).toUpperCase() === String(uno.sku).toUpperCase()) art = s;
+  });
+  var controlado = art && String(art.controlado).toUpperCase() === 'SI';
+  var total = ex.reduce(function (a, x) { return a + Number(x.cantidad || 0); }, 0);
+  var cad = String(uno.caducidad || '').slice(0, 10);
+  var vencido = cad && cad < hoyISO();
+
+  pintar(
+    '<div class="card">' +
+    '<h3>' + esc(uno.nombre || (art && art.nombre) || uno.sku || 'Lote') + '</h3>' +
+    '<div class="lista">' +
+    '<div class="item"><div class="l"><div>Clave</div></div><span class="pill p-neutral">' + esc(uno.sku || '—') + '</span></div>' +
+    '<div class="item"><div class="l"><div>Existencia</div></div><span>' + esc(total) +
+      ' ' + esc((art && art.unidad_base) || '') + '</span></div>' +
+    ex.map(function (x) {
+      return '<div class="item"><div class="l"><div>' + esc(x.ubic_id) + '</div></div><span>' + esc(x.cantidad) + '</span></div>';
+    }).join('') +
+    '<div class="item"><div class="l"><div>Lote del fabricante</div></div><span>' + esc(uno.lote_proveedor || '—') + '</span></div>' +
+    '<div class="item"><div class="l"><div>Caducidad</div></div><span class="pill ' +
+      (vencido ? 'p-crit' : (cad ? 'p-neutral' : 'p-warn')) + '">' +
+      esc(cad || 'sin fecha') + '</span></div>' +
+    (controlado ? '<div class="item"><div class="l"><div>Controlado</div></div>' +
+      '<span class="pill p-warn">Bajo llave y libro de control</span></div>' : '') +
+    '</div></div>' +
+
+    (vencido ? '<div class="aviso a-err"><b>Este lote está caducado.</b> Hay que sacarlo del anaquel ' +
+       'y darlo de baja para que deje de contar como existencia.</div>' : '') +
+
+    '<div class="card"><h3>Corregir datos del lote</h3>' +
+    '<p class="mini">Estos datos describen al lote. Corregirlos no mueve el saldo.</p>' +
+    '<div class="dos">' +
+    '<div class="campo"><label>Caducidad</label><input id="lCad" type="date" value="' + esc(cad) + '"></div>' +
+    '<div class="campo"><label>Lote del fabricante</label><input id="lProv" value="' +
+      esc(uno.lote_proveedor || '') + '"></div>' +
+    '</div>' +
+    '<button class="b-dark" id="lGuardar">Guardar corrección</button>' +
+    '</div>' +
+
+    '<div class="card"><h3>Dar de baja</h3>' +
+    '<p class="mini">Por caducidad, merma o rotura. No se borra nada: el material se mueve a residuos ' +
+    'y el saldo baja porque de verdad salió del almacén.</p>' +
+    '<div class="campo"><label>Motivo</label><input id="bMotivo" placeholder="' +
+      (vencido ? 'Caducó el ' + esc(cad) : 'Por qué se da de baja') + '"></div>' +
+    '<div class="campo"><label>Cantidad (vacío = todo)</label><input id="bCant" type="number" ' +
+      'inputmode="decimal" min="0" step="any" placeholder="' + esc(total) + '"></div>' +
+    (controlado
+      ? '<div class="campo"><label>Número de acta de destrucción</label>' +
+        '<input id="bActa" placeholder="ACTA-2026-001"></div>' +
+        '<p class="mini">Es un medicamento controlado: su destrucción tiene procedimiento propio ' +
+        'ante la autoridad. Sin el número de acta, el inventario y el libro de control dejarían de coincidir.</p>'
+      : '') +
+    (ex.length > 1
+      ? '<div class="campo"><label>¿De cuál ubicación?</label><select id="bUbic">' +
+        ex.map(function (x) { return '<option value="' + esc(x.ubic_id) + '">' +
+          esc(x.ubic_id) + ' · ' + esc(x.cantidad) + '</option>'; }).join('') + '</select></div>'
+      : '') +
+    '<button class="b-dark" id="bBaja">Dar de baja</button>' +
+    '</div>' +
+
+    '<button class="b-ghost" id="bV">Volver</button>');
+
+  $('lGuardar').onclick = async function () {
+    var cambios = {};
+    if ($('lCad').value !== cad) cambios.caducidad = $('lCad').value;
+    if ($('lProv').value.trim() !== String(uno.lote_proveedor || '').trim())
+      cambios.lote_proveedor = $('lProv').value.trim();
+    if (!Object.keys(cambios).length) return alertar('No cambiaste nada.');
+    this.disabled = true; this.textContent = 'Guardando…';
+    try {
+      var r = await enviar({ accion: 'lote_editar', lote_id: loteId, cambios: cambios,
+                             motivo: 'Corrección desde la app' }, true);
+      if (!r.ok) { this.disabled = false; this.textContent = 'Guardar corrección'; return alertar(r.error); }
+      alertar(r.aviso || (r.cambios + ' dato(s) corregidos en ' + loteId + '.'));
+      pantallaLote(loteId, volver);
+    } catch (e) {
+      this.disabled = false; this.textContent = 'Guardar corrección';
+      alertar('Sin señal: corregir un lote necesita conexión.');
+    }
+  };
+
+  $('bBaja').onclick = async function () {
+    var motivo = $('bMotivo').value.trim();
+    if (!motivo) return alertar('La baja necesita un motivo. Queda escrito en el kardex.');
+    /* Sin acta no se manda nada: el backend la exige igual, pero es mejor
+       decirlo aquí que hacerle dar el viaje en balde. */
+    if (controlado && (!$('bActa') || !$('bActa').value.trim()))
+      return alertar('Falta el número de acta de destrucción.');
+    var cant = $('bCant').value.trim();
+    this.disabled = true; this.textContent = 'Dando de baja…';
+    try {
+      var r = await enviar({ accion: 'lote_baja', lote_id: loteId, motivo: motivo,
+        cantidad: cant === '' ? '' : parseFloat(cant),
+        tipo: /caduc|venci/i.test(motivo) ? 'CADUCIDAD' : 'MERMA',
+        acta: $('bActa') ? $('bActa').value.trim() : '',
+        ubic_origen: $('bUbic') ? $('bUbic').value : '',
+        client_id: idCliente() }, true);
+      if (!r.ok) { this.disabled = false; this.textContent = 'Dar de baja'; return alertar(r.error); }
+      alertar('Baja registrada: ' + r.cantidad + ' de ' + loteId + ' → ' + r.destino +
+              (r.queda ? '. Quedan ' + r.queda + '.' : '. El lote quedó en cero.'));
+      pantallaLote(loteId, volver);
+    } catch (e) {
+      this.disabled = false; this.textContent = 'Dar de baja';
+      alertar('Sin señal: dar de baja necesita conexión, porque valida existencia.');
+    }
+  };
+
+  $('bV').onclick = function () { (volver || pantallaLotes)(); };
+}
+
+/* Los folios con existencia y sin caducidad, ya separados en los dos grupos
+   que llevan a acciones distintas: ir a leer el empaque, o bajar a N3. */
+async function pantallaSinFecha() {
+  encabezado('Sin caducidad', 'Lista de trabajo');
+  pintar('<div class="card"><p class="sub">Cargando…</p></div>');
+  try {
+    var r = await enviar({ accion: 'lotes_sin_fecha' }, true);
+    if (!r.ok) return pintar('<div class="aviso a-err">' + esc(r.error) + '</div>');
+    var fila = function (x) {
+      return '<button class="fila-lote" data-lote="' + esc(x.lote_id) + '">' +
+        '<span class="t"><span class="n">' + esc(x.nombre || x.sku) + '</span>' +
+        '<span class="c">' + esc(x.lote_id) + ' · ' + esc(x.sku) +
+        (x.lote_proveedor ? ' · lote ' + esc(x.lote_proveedor) : '') + '</span></span>' +
+        '<span class="pill p-warn">' + esc(x.nivel) + '</span></button>';
+    };
+    pintar(
+      (r.revisar.length
+        ? '<div class="card"><h3>' + r.revisar.length + ' traen la fecha en el empaque</h3>' +
+          '<p class="sub">Hay que ir a leerla de la caja y capturarla. Sin caducidad no hay PEPS ' +
+          'ni alerta de vencimiento.</p>' + r.revisar.map(fila).join('') + '</div>'
+        : '<div class="card"><p class="sub centro">Ningún folio pendiente de fecha.</p></div>') +
+      (r.reclasificar.length
+        ? '<div class="card"><h3>' + r.reclasificar.length + ' no caducan</h3>' +
+          '<p class="sub">Estos no llevan fecha porque no la tienen. Lo que les toca es pasar a ' +
+          'nivel <b>N3</b> — se controlan por consumo, no por lote — y así dejan de aparecer aquí ' +
+          'cada mes. El nivel se cambia en la ficha del insumo, en el catálogo.</p>' +
+          r.reclasificar.map(fila).join('') + '</div>'
+        : '') +
+      '<button class="b-ghost" id="bV">Volver</button>');
+    Array.prototype.forEach.call(document.querySelectorAll('.fila-lote'), function (b) {
+      b.onclick = function () { pantallaLote(this.getAttribute('data-lote'), pantallaSinFecha); };
+    });
     $('bV').onclick = function () { pantallaInicio(); };
   } catch (e) {
     pintar('<div class="aviso a-err">Sin conexión.</div><button class="b-ghost" id="bV">Volver</button>');
