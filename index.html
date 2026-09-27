@@ -201,6 +201,13 @@ button+button{margin-top:9px}
 .p-crit{background:var(--tint-crit);color:var(--crit)}
 .p-info{background:var(--tint-info);color:var(--info)}
 .p-neutral{background:var(--surface-2);color:var(--ink-3)}
+.mapeo{border-top:1px solid var(--rule-soft);padding:9px 0}
+.mapeo:first-of-type{border-top:0}
+.mapeo .cl{font-family:'IBM Plex Mono',monospace;font-size:.74rem;display:block;
+  color:var(--ink);letter-spacing:.02em}
+.mapeo .cl b{font-weight:500;color:var(--accent-deep)}
+.mapeo .nm{display:block;font-size:.8rem;margin-top:2px}
+.mapeo .po{display:block;font-size:.66rem;color:var(--ink-3);margin-top:1px}
 
 .aviso{padding:12px 14px;border-radius:8px;margin-bottom:14px;font-size:.9rem}
 .a-ok{background:var(--tint-ok);color:var(--ok)}
@@ -542,6 +549,12 @@ function pantallaInicio() {
     '<div class="espacio"></div>' +
     '<button class="b-ghost" id="bSinFecha">Folios sin caducidad</button></div>' +
 
+    (String(estado.sesion && estado.sesion.rol).toUpperCase() === 'DIRECTOR'
+      ? '<div class="card"><h3>Folios del catálogo</h3>' +
+        '<p class="sub">El catálogo trae dos numeraciones a la vez: MED-46 es diclofenaco y MED-046 es tramadol. Homologar deja todo en tres dígitos.</p>' +
+        '<button class="b-dark" id="bFolios">Ver el plan de homologación</button></div>'
+      : '') +
+
     '<div class="card"><div class="lista">' +
     '<div class="item"><div class="l"><div>SKU en catálogo</div></div><span class="pill p-neutral">' + c.catalogo.length + '</span></div>' +
     '<div class="item"><div class="l"><div>Almacenes activos</div></div><span class="pill p-neutral">' + c.almacenes.length + '</span></div>' +
@@ -566,6 +579,7 @@ function pantallaInicio() {
   $('bExist').onclick = function () { pantallaExistencias(); };
   $('bLotes').onclick = function () { pantallaLotes(); };
   $('bSinFecha').onclick = function () { pantallaSinFecha(); };
+  if ($('bFolios')) $('bFolios').onclick = function () { pantallaFolios(); };
   $('bActivos').onclick = function () { location.href = '/activos/'; };
   $('bSalir').onclick = function () { estado.sesion = null; escribir(SES_KEY, null); pantallaLogin(); };
   if ($('bReint')) $('bReint').onclick = async function () {
@@ -1373,31 +1387,90 @@ async function pantallaExistencias() {
   }
 }
 
-async function pantallaLotes() {
-  encabezado('Últimos lotes', 'Recepciones recientes');
-  pintar('<div class="card"><p class="sub">Cargando…</p></div>');
-  try {
-    var r = await enviar({ accion: 'lotes_recientes', limite: 25 }, true);
-    if (!r.ok) return pintar('<div class="aviso a-err">' + esc(r.error) + '</div>');
-    var filas = r.lotes.map(function (l) {
-      return '<button class="fila-lote" data-lote="' + esc(l.lote_id) + '">' +
-        '<span class="t"><span class="n mono">' + esc(l.lote_id) + '</span>' +
-        '<span class="c">' + esc(l.sku) + ' · ' + esc(l.proveedor || '—') +
-        (l.caducidad ? ' · cad ' + esc(l.caducidad) : ' · SIN CADUCIDAD') + '</span></span>' +
-        '<span class="pill ' + (l.comprobante === 'FACTURA' ? 'p-ok' : 'p-warn') + '">' +
-        esc(l.comprobante || '—') + '</span></button>';
-    }).join('');
-    pintar('<div class="card"><h3>Últimos ' + r.lotes.length + ' lotes</h3>' +
-      '<p class="mini">Toca un folio para corregir su caducidad o darlo de baja.</p>' +
-      (filas || '<p class="sub centro">Todavía no hay lotes.</p>') + '</div>' +
-      '<button class="b-ghost" id="bV">Volver</button>');
+/* La lista de los últimos 25 alcanza el día de la recepción. No alcanza
+   cuando hay que volver semanas después a un folio porque su caducidad se
+   capturó mal: el folio existía y no había manera de llegar a él. Con
+   búsqueda se llega por folio, clave, nombre o lote del fabricante. */
+async function pantallaLotes(q) {
+  var busca = String(q || '');
+  encabezado(busca ? 'Buscar lote' : 'Últimos lotes',
+             busca ? 'Por folio, clave o nombre' : 'Recepciones recientes');
+
+  var cabeza =
+    '<div class="card">' +
+    '<div class="campo"><label>Buscar un lote</label>' +
+    '<input id="qLote" type="search" placeholder="LOT-2026-0200, MED-010, fentanilo, B24G671" value="' +
+      esc(busca) + '"></div>' +
+    '<p class="mini">Sirve el folio completo o un pedazo, la clave del insumo, ' +
+    'su nombre o el lote que viene impreso en la caja.</p>' +
+    '<div class="b-fila"><button class="b-primary" id="bBuscar">Buscar</button>' +
+    (busca ? '<button class="b-ghost" id="bLimpiar">Ver los últimos</button>' : '') +
+    '</div></div>';
+
+  var enganchar = function () {
+    var lanzar = function () { pantallaLotes($('qLote').value); };
+    $('bBuscar').onclick = lanzar;
+    $('qLote').onkeydown = function (e) { if (e.key === 'Enter') { e.preventDefault(); lanzar(); } };
+    if ($('bLimpiar')) $('bLimpiar').onclick = function () { pantallaLotes(''); };
     Array.prototype.forEach.call(document.querySelectorAll('.fila-lote'), function (b) {
-      b.onclick = function () { pantallaLote(this.getAttribute('data-lote'), pantallaLotes); };
+      var quien = b.getAttribute('data-lote');
+      b.onclick = function () { pantallaLote(quien, function () { pantallaLotes(busca); }); };
     });
     $('bV').onclick = function () { pantallaInicio(); };
+  };
+
+  pintar(cabeza + '<div class="card"><p class="sub">Cargando…</p></div>' +
+         '<button class="b-ghost" id="bV">Volver</button>');
+  enganchar();
+
+  try {
+    var r = busca
+      ? await enviar({ accion: 'lote_buscar', q: busca }, true)
+      : await enviar({ accion: 'lotes_recientes', limite: 25 }, true);
+    if (!r.ok) {
+      pintar(cabeza + '<div class="aviso a-err">' + esc(r.error) + '</div>' +
+             '<button class="b-ghost" id="bV">Volver</button>');
+      return enganchar();
+    }
+
+    var filas = (r.lotes || []).map(function (l) {
+      /* La existencia sólo la trae la búsqueda; en la lista de recientes no
+         se calcula, y un cero inventado ahí sería peor que no mostrarlo. */
+      var tieneEx = l.existencia !== undefined;
+      var marca = tieneEx && l.existencia <= 0
+        ? '<span class="pill p-neutral">agotado</span>'
+        : '<span class="pill ' + (l.comprobante === 'FACTURA' ? 'p-ok' : 'p-warn') + '">' +
+          esc(l.comprobante || '—') + '</span>';
+      return '<button class="fila-lote" data-lote="' + esc(l.lote_id) + '">' +
+        '<span class="t"><span class="n mono">' + esc(l.lote_id) + '</span>' +
+        '<span class="c">' + esc(l.sku) +
+        (l.nombre ? ' · ' + esc(l.nombre) : '') +
+        (tieneEx ? ' · ' + esc(l.existencia) + ' en almacén' : '') +
+        (l.caducidad ? ' · cad ' + esc(l.caducidad) : ' · SIN CADUCIDAD') + '</span></span>' +
+        (String(l.controlado).toUpperCase() === 'SI' ? '<span class="pill p-warn">llave</span>' : '') +
+        marca + '</button>';
+    }).join('');
+
+    var titulo = busca
+      ? (r.total ? r.total + ' lote(s) con “' + esc(busca) + '”' : 'Nada con “' + esc(busca) + '”')
+      : 'Últimos ' + (r.lotes || []).length + ' lotes';
+    var vacio = busca
+      ? '<p class="sub centro">No hay ningún lote con eso. Prueba con menos letras, ' +
+        'o con el nombre del insumo.</p>'
+      : '<p class="sub centro">Todavía no hay lotes.</p>';
+
+    pintar(cabeza +
+      '<div class="card"><h3>' + titulo + '</h3>' +
+      '<p class="mini">Toca un folio para corregir su caducidad o darlo de baja.</p>' +
+      (filas || vacio) +
+      (r.recortado ? '<p class="mini">Se muestran los primeros 40. Afina la búsqueda.</p>' : '') +
+      '</div>' +
+      '<button class="b-ghost" id="bV">Volver</button>');
+    enganchar();
   } catch (e) {
-    pintar('<div class="aviso a-err">Sin conexión.</div><button class="b-ghost" id="bV">Volver</button>');
-    $('bV').onclick = function () { pantallaInicio(); };
+    pintar(cabeza + '<div class="aviso a-err">Sin conexión.</div>' +
+           '<button class="b-ghost" id="bV">Volver</button>');
+    enganchar();
   }
 }
 
@@ -1589,6 +1662,125 @@ function plano(s) {
     .toLowerCase().trim();
 }
 
+/* =================================================================
+   Homologar los folios del catálogo — sólo el director
+   =================================================================
+   El catálogo creció con dos numeraciones a la vez: la sembrada usa tres
+   dígitos y la capturada después usa dos. MED-46 es diclofenaco y MED-046
+   es tramadol. Esta pantalla muestra primero qué pasaría, y hasta que se
+   ve el plan completo se puede aplicar.
+   ================================================================= */
+async function pantallaFolios() {
+  encabezado('Folios del catálogo', 'Homologar a tres dígitos');
+  pintar('<div class="card"><p class="sub">Calculando el plan…</p></div>');
+  var r;
+  try {
+    r = await enviar({ accion: 'folios_plan' }, true);
+  } catch (e) {
+    pintar('<div class="aviso a-err">Sin conexión.</div><button class="b-ghost" id="bV">Volver</button>');
+    return $('bV').onclick = function () { pantallaInicio(); };
+  }
+  if (!r.ok) {
+    pintar('<div class="aviso a-err">' + esc(r.error) + '</div><button class="b-ghost" id="bV">Volver</button>');
+    return $('bV').onclick = function () { pantallaInicio(); };
+  }
+
+  var reasig = r.mapa.filter(function (m) { return m.motivo === 'OCUPADO'; });
+
+  var tabla = reasig.map(function (m) {
+    return '<div class="mapeo">' +
+      '<span class="cl">' + esc(m.antes) + ' &rarr; <b>' + esc(m.despues) + '</b></span>' +
+      '<span class="nm">' + esc(m.nombre) +
+      (m.controlado === 'SI' ? ' <span class="pill p-warn">llave</span>' : '') + '</span>' +
+      '<span class="po">su clave con cero, ' + esc(m.ocupaba) + ', ya es de otro insumo</span>' +
+      '</div>';
+  }).join('');
+
+  pintar(
+    (r.conflictos.length
+      ? '<div class="aviso a-err"><b>No se puede aplicar todavía.</b><br>' +
+        r.conflictos.map(esc).join('<br>') + '</div>'
+      : '') +
+
+    '<div class="card"><h3>Qué pasaría</h3>' +
+    '<div class="lista">' +
+    '<div class="item"><div class="l"><div>Insumos en el catálogo</div></div><span class="pill p-neutral">' + r.total_catalogo + '</span></div>' +
+    '<div class="item"><div class="l"><div>No cambian</div><div class="mini">ya están de tres dígitos</div></div><span class="pill p-ok">' + r.sin_cambio + '</span></div>' +
+    '<div class="item"><div class="l"><div>Sólo ganan un cero</div><div class="mini">mismo número, con cero</div></div><span class="pill p-neutral">' + r.solo_cero + '</span></div>' +
+    '<div class="item"><div class="l"><div>Cambian de número</div><div class="mini">su clave con cero está ocupada</div></div><span class="pill p-warn">' + r.reasignados + '</span></div>' +
+    '</div>' +
+    '<p class="mini">El folio del lote (LOT-…) no cambia, y el código QR de las ' +
+    'etiquetas lleva el folio del lote, no la clave del insumo: lo que ya está ' +
+    'pegado sigue leyéndose bien. Las existencias no se mueven.</p>' +
+    '</div>' +
+
+    (reasig.length
+      ? '<div class="card"><h3>Los ' + reasig.length + ' que cambian de número</h3>' +
+        '<p class="mini">El que llegó primero se queda con su número. El otro se va al final de su familia.</p>' +
+        tabla + '</div>'
+      : '') +
+
+    (r.fuera_de_formato.length
+      ? '<div class="card"><h3>Se quedan igual</h3>' +
+        '<p class="mini">Estas claves no tienen la forma PREFIJO-NÚMERO, así que no se tocan.</p>' +
+        '<div class="lista">' + r.fuera_de_formato.map(function (x) {
+          return '<div class="item"><div class="l"><div class="mono">' + esc(x.sku) + '</div>' +
+                 '<div class="mini">' + esc(x.nombre) + '</div></div></div>';
+        }).join('') + '</div></div>'
+      : '') +
+
+    (r.mapa.length && !r.conflictos.length
+      ? '<div class="card"><h3>Aplicar</h3>' +
+        '<p class="sub">Se renombran las claves en el catálogo y en todo el historial ' +
+        '—lotes, movimientos y bitácoras— en un solo paso, y queda registro de qué ' +
+        'clave tenía antes cada insumo. Al terminar se verifica que ningún lote ' +
+        'quedó suelto y que no se movió ninguna pieza.</p>' +
+        '<button class="b-primary" id="bAplicar">Homologar los ' + r.mapa.length + ' folios</button></div>'
+      : (r.mapa.length ? '' : '<div class="aviso a-ok">Los folios ya están homologados. No hay nada que mover.</div>')) +
+
+    '<button class="b-ghost" id="bV">Volver</button>');
+
+  $('bV').onclick = function () { pantallaInicio(); };
+
+  if ($('bAplicar')) $('bAplicar').onclick = async function () {
+    var boton = this;
+    boton.disabled = true; boton.textContent = 'Homologando…';
+    var res;
+    try {
+      res = await enviar({ accion: 'folios_homologar', confirmar: 'HOMOLOGAR' }, true);
+    } catch (e) {
+      boton.disabled = false; boton.textContent = 'Homologar los ' + r.mapa.length + ' folios';
+      return alertar('Sin conexión. No se aplicó nada.');
+    }
+    if (!res.ok) {
+      boton.disabled = false; boton.textContent = 'Homologar los ' + r.mapa.length + ' folios';
+      return alertar(res.error + (res.conflictos ? '\n' + res.conflictos.join('\n') : ''));
+    }
+    /* El catálogo en el teléfono quedó con las claves viejas: hay que
+       recargarlo antes de pintar cualquier pantalla que lo use. */
+    await cargarCat();
+    var huerf = Object.keys(res.huerfanos || {});
+    encabezado('Folios homologados', 'Listo');
+    pintar(
+      '<div class="aviso ' + (res.saldo_intacto && !huerf.length ? 'a-ok' : 'a-warn') + '">' +
+      '<b>Se homologaron ' + res.cambios + ' folios.</b><br>' +
+      res.solo_cero + ' sólo ganaron el cero y ' + res.reasignados + ' cambiaron de número.</div>' +
+      '<div class="card"><h3>Verificación</h3><div class="lista">' +
+      '<div class="item"><div class="l"><div>Las existencias no se movieron</div></div>' +
+      '<span class="pill ' + (res.saldo_intacto ? 'p-ok' : 'p-crit') + '">' +
+      (res.saldo_intacto ? 'sí' : 'REVISAR') + '</span></div>' +
+      '<div class="item"><div class="l"><div>Lotes apuntando a una clave que no existe</div></div>' +
+      '<span class="pill ' + (huerf.length ? 'p-crit' : 'p-ok') + '">' + huerf.length + '</span></div>' +
+      '</div>' +
+      (huerf.length ? '<p class="mini">' + esc(huerf.join(', ')) + '</p>' : '') +
+      (res.diferencias && res.diferencias.length
+        ? '<p class="mini">' + esc(res.diferencias.join(' · ')) + '</p>' : '') +
+      '</div>' +
+      '<button class="b-primary" id="bFin">Volver al inicio</button>');
+    $('bFin').onclick = function () { pantallaInicio(); };
+  };
+}
+
 function pantallaCatalogo(filtro) {
   encabezado('Catálogo', 'Qué es cada cosa');
   var lista = ((estado.cat && estado.cat.catalogo) || []).slice();
@@ -1738,7 +1930,10 @@ function pantallaSkuFicha(sku, volver) {
     '<div class="item"><div class="l"><div>Se descuenta en</div></div><span>' + esc(art.unidad_base || '—') + '</span></div>' +
     (String(art.controlado).toUpperCase() === 'SI'
       ? '<div class="item"><div class="l"><div>Controlado</div></div><span class="pill p-warn">Bajo llave y libro de control</span></div>' : '') +
-    '</div></div>' +
+    '</div>' +
+    '<div class="espacio"></div>' +
+    '<button class="b-ghost" id="bSusLotes">Ver sus lotes y caducidades</button>' +
+    '</div>' +
 
     (art.alerta
       ? '<div class="aviso a-warn"><b>Revisa la caja de este producto.</b><br>' + esc(art.alerta) +
@@ -1772,6 +1967,8 @@ function pantallaSkuFicha(sku, volver) {
     '</div>' +
 
     '<button class="b-ghost" id="bV">Volver</button>');
+
+  $('bSusLotes').onclick = function () { pantallaLotes(art.sku); };
 
   if (art.tiene_foto) {
     traerFoto(art.sku).then(function (img) {
