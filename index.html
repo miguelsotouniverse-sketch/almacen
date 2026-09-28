@@ -279,13 +279,22 @@ var GATEWAY = 'https://script.google.com/macros/s/AKfycbz0VFVwemsK8M2_nqwp-0zMcG
 
 var COLA_KEY = 'msu_alm_cola';
 var SES_KEY = 'msu_alm_sesion';
+/* La caja que se va a imprimir se deja aquí y la lee hojas_caja.html. No
+   viaja por la URL: una caja de treinta renglones no cabe en una. */
+var HOJAS_KEY = 'msu_alm_hojas_caja';
 var CAT_KEY = 'msu_alm_cat';
 
 var estado = {
   sesion: leer(SES_KEY, null),
   cat: leer(CAT_KEY, null),
   cabecera: null,
-  lineas: []
+  lineas: [],
+  /* La huella de ESTA recepción. Se genera una sola vez, al abrir la
+     cabecera, y se conserva en todos los reintentos: es lo que permite al
+     backend reconocer que el segundo envío es el mismo que el primero y no
+     una compra nueva. Generarla en cada clic de Guardar convertía cada
+     reintento en una recepción distinta. */
+  client_id: null
 };
 
 function leer(k, def) {
@@ -579,7 +588,7 @@ function pantallaInicio() {
   $('bExist').onclick = function () { pantallaExistencias(); };
   $('bLotes').onclick = function () { pantallaLotes(); };
   $('bSinFecha').onclick = function () { pantallaSinFecha(); };
-  if ($('bFolios')) $('bFolios').onclick = function () { pantallaFolios(); };
+  if ($('bFolios')) $('bFolios').onclick = function () { pantallaHomologarFolios(); };
   $('bActivos').onclick = function () { location.href = '/activos/'; };
   $('bSalir').onclick = function () { estado.sesion = null; escribir(SES_KEY, null); pantallaLogin(); };
   if ($('bReint')) $('bReint').onclick = async function () {
@@ -625,7 +634,9 @@ function pantallaCabecera() {
     '<button class="b-primary" id="bSig">Continuar a los renglones</button>' +
     '<button class="b-ghost" id="bCanc">Cancelar</button>');
 
-  $('bCanc').onclick = function () { estado.cabecera = null; estado.lineas = []; pantallaInicio(); };
+  $('bCanc').onclick = function () {
+    estado.cabecera = null; estado.lineas = []; estado.client_id = null; pantallaInicio();
+  };
   $('bSig').onclick = function () {
     estado.cabecera = {
       almacen: $('kAlm').value, fecha: $('kFecha').value,
@@ -633,6 +644,7 @@ function pantallaCabecera() {
       folio_fiscal: $('kFolio').value.trim()
     };
     if (!estado.cabecera.proveedor) return alertar('Falta el proveedor.');
+    if (!estado.client_id) estado.client_id = idCliente();
     pantallaLineas();
   };
 }
@@ -757,17 +769,28 @@ function pantallaLineas() {
   $('bGuardar').onclick = async function () {
     this.disabled = true; this.textContent = 'Guardando…';
     var payload = {
-      accion: 'recepcion_guardar', encolable: true, client_id: idCliente(),
+      accion: 'recepcion_guardar', encolable: true,
+      client_id: estado.client_id || (estado.client_id = idCliente()),
       cabecera: estado.cabecera, lineas: estado.lineas
     };
     try {
       var r = await enviar(payload);
+      /* El backend detectó una recepción que se le parece demasiado. No la
+         rechaza: pregunta, porque dos entregas iguales el mismo día sí
+         existen. Quien decide es quien tiene la mercancía enfrente. */
+      if (r.ok === false && r.confirmar === 'DUPLICADO') {
+        this.disabled = false; this.textContent = 'Guardar recepción';
+        if (!confirm(r.error)) return;
+        this.disabled = true; this.textContent = 'Guardando…';
+        payload.confirmar_duplicado = 'SI';
+        r = await enviar(payload);
+      }
       if (r.ok === false) {
         this.disabled = false; this.textContent = 'Guardar recepción';
         return alertar(r.error);
       }
       if (r.encolado) {
-        estado.cabecera = null; estado.lineas = [];
+        estado.cabecera = null; estado.lineas = []; estado.client_id = null;
         pantallaInicio();
         return alertar('Guardado en el teléfono. Se enviará al recuperar señal. Los folios de lote se asignan al enviarse.');
       }
@@ -893,7 +916,7 @@ function acumularEtiquetas(lotes) {
 
 function pantallaFolios(r) {
   encabezado('Recepción guardada', r.recepcion_id || '');
-  estado.cabecera = null; estado.lineas = [];
+  estado.cabecera = null; estado.lineas = []; estado.client_id = null;
 
   /* Se guardan en la cola de etiquetas apenas se pinta la pantalla, no al
      apretar el botón: si se van directo a «Registrar otra recepción» estos
@@ -1103,8 +1126,22 @@ async function pantallaCajaDetalle(cajaId) {
       : '<p class="sub centro">La caja está vacía. Empieza por «Sacar material».</p>') +
     '</div>' +
 
+    '<button class="b-ghost" id="bHojas">Imprimir hojas de esta caja</button>' +
     '<button class="b-ghost" id="bEtq">Imprimir etiqueta de la caja</button>' +
     '<button class="b-ghost" id="bV">Volver a las cajas</button>');
+
+  /* Las tres hojas salen con los folios de lote ya impresos. Esa es toda la
+     diferencia con el formato en blanco: al cerrar, en vez de transcribir
+     veintitantos folios a mano —que es donde se va el tiempo y donde se
+     cometen los errores— sólo se escribe lo que regresa. */
+  $('bHojas').onclick = function () {
+    try {
+      escribir(HOJAS_KEY, { caja: k, lineas: r.lineas || [] });
+      location.href = 'hojas_caja.html';
+    } catch (e) {
+      alertar('No se pudieron preparar las hojas. Intenta de nuevo.');
+    }
+  };
 
   if ($('bSacar')) $('bSacar').onclick = function () { pantallaCajaMover(cajaId, 'SALIDA'); };
   if ($('bRegresar')) $('bRegresar').onclick = function () { pantallaCajaMover(cajaId, 'RETORNO'); };
@@ -1670,7 +1707,7 @@ function plano(s) {
    es tramadol. Esta pantalla muestra primero qué pasaría, y hasta que se
    ve el plan completo se puede aplicar.
    ================================================================= */
-async function pantallaFolios() {
+async function pantallaHomologarFolios() {
   encabezado('Folios del catálogo', 'Homologar a tres dígitos');
   pintar('<div class="card"><p class="sub">Calculando el plan…</p></div>');
   var r;

@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0C0E0D">
+<title>Hojas de caja · MS Universe</title>
+
+<style>
+/* ---------- pantalla ---------- */
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:#F4F2F1;color:#0C0E0D;
+  font:16px/1.5 'Jost',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  padding-bottom:env(safe-area-inset-bottom);
+}
+header{background:#0C0E0D;color:#F4F2F1;padding:calc(12px + env(safe-area-inset-top)) 16px 12px}
+header b{font-size:1.05rem;display:block}
+header span{font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;color:#9AA09C}
+main{padding:16px;max-width:900px;margin:0 auto}
+
+.card{background:#fff;border:1px solid #D8D2CC;border-radius:10px;padding:16px;margin-bottom:14px}
+h2{font-size:1rem;font-weight:600;margin:0 0 6px}
+p.sub{color:#6E736F;font-size:.9rem;margin:0 0 14px}
+.mini{font-size:.84rem;color:#6E736F;margin:8px 0 0}
+
+button{
+  width:100%;border:0;border-radius:9px;padding:14px 16px;font:inherit;font-weight:500;
+  cursor:pointer;margin-bottom:9px;
+}
+.b-primary{background:#0C0E0D;color:#F4F2F1}
+.b-ghost{background:#fff;color:#0C0E0D;border:1px solid #D8D2CC}
+
+.aviso{border-radius:9px;padding:12px 14px;font-size:.92rem;margin-bottom:14px}
+.a-err{background:#F5DED8;color:#A33F30}
+
+/* ---------- las hojas ---------- */
+#hojas{background:transparent}
+.hoja{
+  background:#fff;color:#0C0E0D;border:1px solid #D8D2CC;border-radius:8px;
+  padding:14mm 12mm;margin:0 0 16px;
+}
+.marca{
+  font-family:'IBM Plex Mono',ui-monospace,'SF Mono',Menlo,monospace;
+  font-size:7.4pt;letter-spacing:.34em;text-transform:uppercase;color:#6B5D51;
+  border-bottom:2px solid #0C0E0D;padding-bottom:7px;margin-bottom:11px;
+}
+.hoja h3{font-size:15pt;font-weight:400;margin:0 0 3px;letter-spacing:-.01em}
+.hoja .lede{font-size:9pt;color:#6E736F;margin:0 0 12px}
+
+.ficha{
+  display:grid;grid-template-columns:repeat(4,1fr);gap:7px 12px;
+  border:1px solid #D8D2CC;border-radius:6px;padding:9px 11px;margin-bottom:12px;
+}
+.ficha .c{font-size:7pt;letter-spacing:.12em;text-transform:uppercase;color:#6B5D51;display:block}
+.ficha .v{font-size:10pt;display:block;min-height:1.25em}
+.ficha .v.mono{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9pt}
+.ficha .ancho{grid-column:span 2}
+
+table{width:100%;border-collapse:collapse;margin:0 0 4px}
+th{
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:6.6pt;letter-spacing:.1em;
+  text-transform:uppercase;color:#6B5D51;text-align:left;font-weight:500;
+  border-bottom:1.4px solid #0C0E0D;padding:0 5px 4px;
+}
+td{border-bottom:1px solid #E6E1DC;padding:5px;font-size:8.6pt;vertical-align:top}
+td.mono{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:7.6pt}
+td.num{text-align:center;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9pt}
+td.esc{background:#FAF8F7}
+tr.grupo td{
+  background:#F1EEEB;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:6.8pt;
+  letter-spacing:.12em;text-transform:uppercase;color:#3D423F;padding:5px;font-weight:500;
+}
+.c-nom{width:auto}
+.c-lote{width:27mm}
+.c-cad{width:19mm}
+.c-n{width:13mm}
+.c-obs{width:32mm}
+
+.nota{
+  border-left:3px solid #A19487;background:#F1EEEB;border-radius:0 5px 5px 0;
+  padding:9px 12px;margin:10px 0 0;font-size:8.4pt;color:#3D423F;
+}
+.nota.ojo{border-left-color:#A33F30;background:#F5DED8;color:#A33F30}
+
+.firmas{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:20px}
+.firma{border-top:1px solid #0C0E0D;padding-top:5px;font-size:7.4pt;color:#6E736F;
+  letter-spacing:.06em;text-transform:uppercase}
+.resumen{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:12px 0 4px}
+.resumen .b{border:1px solid #D8D2CC;border-radius:6px;padding:9px 11px}
+.resumen .k{font-size:6.8pt;letter-spacing:.12em;text-transform:uppercase;color:#6B5D51;display:block}
+.resumen .n{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:14pt;display:block;margin-top:2px}
+
+/* ---------- impresión ---------- */
+@page{size:Letter;margin:12mm 10mm}
+@media print{
+  html,body{background:#fff}
+  header,main > .card,#barra{display:none !important}
+  main{padding:0;max-width:none}
+  #hojas{display:block}
+  .hoja{
+    border:0;border-radius:0;padding:0;margin:0;
+    break-after:page;page-break-after:always;
+  }
+  .hoja:last-child{break-after:auto;page-break-after:auto}
+  tr{break-inside:avoid;page-break-inside:avoid}
+  thead{display:table-header-group}
+  td.esc{background:transparent;border-left:1px solid #E6E1DC;border-right:1px solid #E6E1DC}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <b>Hojas de caja</b>
+  <span id="hSub">Cargando…</span>
+</header>
+
+<main>
+  <div class="card" id="barra">
+    <h2>Tres hojas para esta caja</h2>
+    <p class="sub">Surtido con los folios ya impresos, adicionales para pegar a la caja,
+      y cierre para el conteo de regreso al alta.</p>
+    <button class="b-primary" id="bImprimir">Imprimir las tres</button>
+    <button class="b-ghost" id="bVolver">Volver a la app</button>
+    <p class="mini" id="nota"></p>
+  </div>
+  <div id="hojas"></div>
+</main>
+
+<script>
+/* ------------------------------------------------------------------
+   La caja llega por localStorage, igual que las etiquetas: la app la
+   deja ahí justo antes de abrir esta página. No viaja por la URL
+   porque una caja con treinta renglones no cabe en una.
+
+   Y a propósito NO se consulta al gateway desde aquí: estas hojas se
+   imprimen en el momento de surtir, que es cuando el almacén está
+   ocupado y la señal es peor. Lo que se necesita ya está en el
+   teléfono.
+   ------------------------------------------------------------------ */
+var LLAVE = 'msu_alm_hojas_caja';
+var datos = null;
+
+try {
+  var crudo = localStorage.getItem(LLAVE);
+  if (crudo) datos = JSON.parse(crudo);
+} catch (e) { datos = null; }
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+  });
+}
+function fecha(v) {
+  var s = String(v == null ? '' : v);
+  var m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? m[3] + '/' + m[2] + '/' + m[1] : s.slice(0, 16);
+}
+function renglonesVacios(n, celdas) {
+  var out = '';
+  for (var i = 0; i < n; i++) {
+    out += '<tr>';
+    for (var j = 0; j < celdas.length; j++) {
+      out += '<td class="' + celdas[j] + '">&nbsp;</td>';
+    }
+    out += '</tr>';
+  }
+  return out;
+}
+
+var MARCA = 'F a r m a c i a &nbsp;h o s p i t a l a r i a &nbsp;·&nbsp; C a j a &nbsp;q u i r ú r g i c a';
+
+function ficha(c, extra) {
+  return '<div class="ficha">' +
+    '<div class="ancho"><span class="c">Paciente</span><span class="v">' + esc(c.paciente || '') + '</span></div>' +
+    '<div><span class="c">Folio de caja</span><span class="v mono">' + esc(c.caja_id || '') + '</span></div>' +
+    '<div><span class="c">Fecha</span><span class="v">' + esc(fecha(c.abierta_en)) + '</span></div>' +
+    '<div class="ancho"><span class="c">Procedimiento</span><span class="v">' + esc(c.procedimiento || '') + '</span></div>' +
+    '<div><span class="c">Almacén</span><span class="v mono">' + esc(c.almacen || '') + '</span></div>' +
+    '<div><span class="c">' + (extra || 'Surtió') + '</span><span class="v">&nbsp;</span></div>' +
+    '</div>';
+}
+
+/* Los renglones se agrupan por categoría para que la hoja se recorra en el
+   mismo orden en que está el anaquel, no en orden alfabético puro. */
+function agrupar(lineas) {
+  var orden = [], grupos = {};
+  lineas.forEach(function (l) {
+    var g = (String(l.sku).split('-')[0] || 'OTR').toUpperCase();
+    if (!grupos[g]) { grupos[g] = []; orden.push(g); }
+    grupos[g].push(l);
+  });
+  orden.sort();
+  return orden.map(function (g) { return { clave: g, lineas: grupos[g] }; });
+}
+
+var NOMBRE_GRUPO = {
+  MED: 'Medicamentos', INY: 'Inyectables', SUT: 'Suturas', HIL: 'Hilos',
+  IMP: 'Implantes', CNS: 'Consumibles', AER: 'Vía aérea', ECG: 'Monitoreo',
+  ROP: 'Ropa quirúrgica', TEX: 'Textiles', SOL: 'Soluciones', OTR: 'Otros',
+  CEY: 'CEyE', MAD: 'Madera', ALG: 'Algodón', INT: 'Intubación',
+  SND: 'Sondas', SCR: 'Cepillos', TEG: 'Tegaderm', VEN: 'Vendajes', EST: 'Estériles'
+};
+function nombreGrupo(g) { return NOMBRE_GRUPO[g] || g; }
+
+/* ---------- hoja 1: surtido y retorno ---------- */
+function hojaSurtido(c, lineas) {
+  var cuerpo = agrupar(lineas).map(function (gr) {
+    return '<tr class="grupo"><td colspan="7">' + esc(nombreGrupo(gr.clave)) + '</td></tr>' +
+      gr.lineas.map(function (l) {
+        return '<tr>' +
+          '<td class="c-nom">' + esc(l.nombre) + '</td>' +
+          '<td class="mono c-lote">' + esc(l.lote_id) + '</td>' +
+          '<td class="mono c-cad">' + esc(fecha(l.caducidad) || '—') + '</td>' +
+          '<td class="num c-n">' + esc(l.salio) + '</td>' +
+          '<td class="esc c-n">&nbsp;</td>' +
+          '<td class="esc c-n">&nbsp;</td>' +
+          '<td class="esc c-obs">&nbsp;</td>' +
+          '</tr>';
+      }).join('');
+  }).join('');
+
+  return '<div class="hoja">' +
+    '<div class="marca">' + MARCA + '</div>' +
+    '<h3>Surtido y retorno</h3>' +
+    '<p class="lede">Los folios de lote van impresos: al cerrar sólo se escribe lo que regresa.</p>' +
+    ficha(c) +
+    '<table><thead><tr>' +
+    '<th class="c-nom">Insumo / medicamento</th>' +
+    '<th class="c-lote">Folio de lote</th>' +
+    '<th class="c-cad">Caducidad</th>' +
+    '<th class="c-n">Salió</th>' +
+    '<th class="c-n">Regresa</th>' +
+    '<th class="c-n">Consumo</th>' +
+    '<th class="c-obs">Observaciones</th>' +
+    '</tr></thead><tbody>' + cuerpo + '</tbody></table>' +
+    '<div class="nota">El consumo no se captura: se calcula. <b>Salió &minus; Regresa = Consumo.</b> ' +
+    'La columna de consumo es para el cotejo a mano; el sistema la saca sola al cerrar.</div>' +
+    '<div class="nota ojo">Los medicamentos controlados no van en la caja. Se surten contra receta, ' +
+    'pieza por pieza, con devolución de ampolleta.</div>' +
+    '</div>';
+}
+
+/* ---------- hoja 2: adicionales ---------- */
+function hojaAdicionales(c) {
+  return '<div class="hoja">' +
+    '<div class="marca">' + MARCA + '</div>' +
+    '<h3>Adicionales durante cirugía u hospitalización</h3>' +
+    '<p class="lede">Va pegada a la caja. Todo lo que se pida después del surtido se anota aquí, ' +
+    'en el momento — y se captura al regreso o al cierre.</p>' +
+    ficha(c, 'Pidió') +
+    '<table><thead><tr>' +
+    '<th class="c-cad">Hora</th>' +
+    '<th class="c-nom">Insumo / medicamento</th>' +
+    '<th class="c-n">Pidió</th>' +
+    '<th class="c-n">Surtió</th>' +
+    '<th class="c-lote">Folio de lote</th>' +
+    '<th class="c-n">Regresa</th>' +
+    '<th class="c-obs">Motivo</th>' +
+    '</tr></thead><tbody>' +
+    renglonesVacios(16, ['esc c-cad','esc c-nom','esc c-n','esc c-n','esc c-lote','esc c-n','esc c-obs']) +
+    '</tbody></table>' +
+    '<div class="nota">Pedir de más está bien: lo que sobra regresa y no cuenta como consumo. ' +
+    'Lo que importa anotar es <b>el motivo</b> cuando el insumo no venía en la plantilla — ' +
+    'si fue por condición de la paciente (alergia, contraindicación) o por criterio quirúrgico. ' +
+    'Lo primero no cambia la plantilla; lo segundo sí.</div>' +
+    '</div>';
+}
+
+/* ---------- hoja 3: cierre ---------- */
+function hojaCierre(c, lineas) {
+  var piezas = lineas.reduce(function (a, l) { return a + (Number(l.salio) || 0); }, 0);
+  return '<div class="hoja">' +
+    '<div class="marca">' + MARCA + '</div>' +
+    '<h3>Cierre de caja</h3>' +
+    '<p class="lede">Se llena al alta de la paciente, con la caja de vuelta en farmacia.</p>' +
+    ficha(c, 'Contó el regreso') +
+    '<div class="resumen">' +
+    '<div class="b"><span class="k">Renglones surtidos</span><span class="n">' + lineas.length + '</span></div>' +
+    '<div class="b"><span class="k">Piezas que salieron</span><span class="n">' + Math.round(piezas * 1000) / 1000 + '</span></div>' +
+    '<div class="b"><span class="k">Adicionales</span><span class="n">&nbsp;</span></div>' +
+    '</div>' +
+    '<table><thead><tr>' +
+    '<th class="c-nom">Qué se revisa antes de cerrar</th>' +
+    '<th class="c-n">Sí</th>' +
+    '<th class="c-obs">Observaciones</th>' +
+    '</tr></thead><tbody>' +
+    [['Se contó lo que regresó, renglón por renglón',''],
+     ['Los N1 se contaron pieza por pieza',''],
+     ['Lo que se abrió o contaminó y no se usó se anotó como merma, con motivo',''],
+     ['Los implantes coinciden con el expediente y con la tarjeta de la paciente',''],
+     ['Los controlados coinciden con la hoja de anestesia y el libro de control',''],
+     ['Los adicionales de la otra hoja están capturados','']
+    ].map(function (r) {
+      return '<tr><td class="c-nom">' + r[0] + '</td><td class="esc c-n">&nbsp;</td>' +
+             '<td class="esc c-obs">&nbsp;</td></tr>';
+    }).join('') +
+    '</tbody></table>' +
+    '<div class="nota">Lo que se abrió y no se usó <b>no es consumo</b>: es merma, y va con motivo. ' +
+    'Si se mezcla con el consumo, el costo de la cirugía queda inflado.</div>' +
+    '<div class="firmas">' +
+    '<div class="firma">Cerró el corte (Farmacia)</div>' +
+    '<div class="firma">Visto bueno (Cirujano)</div>' +
+    '<div class="firma">Capturado en el sistema por</div>' +
+    '</div>' +
+    '</div>';
+}
+
+/* ---------- armado ---------- */
+function pintar() {
+  var cont = document.getElementById('hojas');
+  if (!datos || !datos.caja) {
+    document.getElementById('hSub').textContent = 'Sin datos';
+    cont.innerHTML = '';
+    document.querySelector('#barra').insertAdjacentHTML('afterbegin',
+      '<div class="aviso a-err">No hay ninguna caja que imprimir. ' +
+      'Vuelve a la app, abre la caja y dale otra vez a “Imprimir hojas”.</div>');
+    document.getElementById('bImprimir').style.display = 'none';
+    return;
+  }
+  var c = datos.caja, lineas = (datos.lineas || []).filter(function (l) {
+    return Number(l.salio) > 0;
+  });
+  document.getElementById('hSub').textContent = (c.caja_id || '') + ' · ' + (c.paciente || '');
+  document.getElementById('nota').textContent =
+    lineas.length + ' renglón(es) surtido(s). Tres hojas, una por página.';
+  cont.innerHTML = hojaSurtido(c, lineas) + hojaAdicionales(c) + hojaCierre(c, lineas);
+}
+
+pintar();
+
+document.getElementById('bImprimir').onclick = function () { window.print(); };
+document.getElementById('bVolver').onclick = function () { location.href = './'; };
+</script>
+</body>
+</html>

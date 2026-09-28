@@ -1,11 +1,12 @@
 /* Service worker — cachea el armazón de la app para que abra sin señal.
    Los datos NUNCA se cachean: siempre van al gateway o a la cola local. */
 
-var CACHE = 'msu-almacen-v17';
+var CACHE = 'msu-almacen-v19';
 var FAMILIA = 'msu-almacen-';
 var ARCHIVOS = ['./', './index.html', './manifest.json'];
-/* La impresión de etiquetas tiene que servir sin señal en el almacén. */
-var OPCIONALES = ['./etiquetas.html', './qrcode.js'];
+/* Imprimir etiquetas y hojas de caja tiene que servir sin señal: se hace en
+   el almacén al surtir, que es justo donde la señal es peor. */
+var OPCIONALES = ['./etiquetas.html', './qrcode.js', './hojas_caja.html'];
 
 self.addEventListener('install', function (e) {
   e.waitUntil(
