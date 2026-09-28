@@ -201,6 +201,10 @@ button+button{margin-top:9px}
 .p-crit{background:var(--tint-crit);color:var(--crit)}
 .p-info{background:var(--tint-info);color:var(--info)}
 .p-neutral{background:var(--surface-2);color:var(--ink-3)}
+.sub-t{font-family:'IBM Plex Mono',monospace;font-size:.62rem;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--accent-deep);margin:12px 0 2px;
+  border-bottom:1px solid var(--rule-soft);padding-bottom:4px}
+.sub-t:first-child{margin-top:0}
 .mapeo{border-top:1px solid var(--rule-soft);padding:9px 0}
 .mapeo:first-of-type{border-top:0}
 .mapeo .cl{font-family:'IBM Plex Mono',monospace;font-size:.74rem;display:block;
@@ -558,6 +562,10 @@ function pantallaInicio() {
     '<div class="espacio"></div>' +
     '<button class="b-ghost" id="bSinFecha">Folios sin caducidad</button></div>' +
 
+    '<div class="card"><h3>Plantillas</h3>' +
+    '<p class="sub">Qué lleva cada procedimiento. Es la medida contra la que se compara lo que de verdad consumió una caja.</p>' +
+    '<button class="b-dark" id="bPlant">Ver plantillas</button></div>' +
+
     (String(estado.sesion && estado.sesion.rol).toUpperCase() === 'DIRECTOR'
       ? '<div class="card"><h3>Folios del catálogo</h3>' +
         '<p class="sub">El catálogo trae dos numeraciones a la vez: MED-46 es diclofenaco y MED-046 es tramadol. Homologar deja todo en tres dígitos.</p>' +
@@ -588,6 +596,7 @@ function pantallaInicio() {
   $('bExist').onclick = function () { pantallaExistencias(); };
   $('bLotes').onclick = function () { pantallaLotes(); };
   $('bSinFecha').onclick = function () { pantallaSinFecha(); };
+  $('bPlant').onclick = function () { pantallaPlantillas(); };
   if ($('bFolios')) $('bFolios').onclick = function () { pantallaHomologarFolios(); };
   $('bActivos').onclick = function () { location.href = '/activos/'; };
   $('bSalir').onclick = function () { estado.sesion = null; escribir(SES_KEY, null); pantallaLogin(); };
@@ -1697,6 +1706,200 @@ function plano(s) {
   return String(s == null ? '' : s)
     .normalize('NFD').replace(/[̀-ͯ]/g, '')
     .toLowerCase().trim();
+}
+
+/* =================================================================
+   Plantillas por procedimiento
+   =================================================================
+   La plantilla es la medida contra la que se compara el consumo de una
+   caja. Mientras un renglón no tenga clave del catálogo, no puede
+   compararse con nada: por eso la pantalla empieza por lo que falta
+   amarrar, y no por la lista completa.
+   ================================================================= */
+async function pantallaPlantillas() {
+  encabezado('Plantillas', 'Qué lleva cada procedimiento');
+  pintar('<div class="card"><p class="sub">Cargando…</p></div>');
+  var r;
+  try { r = await enviar({ accion: 'plantillas' }, true); }
+  catch (e) {
+    pintar('<div class="aviso a-err">Sin conexión.</div><button class="b-ghost" id="bV">Volver</button>');
+    return $('bV').onclick = function () { pantallaInicio(); };
+  }
+  if (!r.ok) {
+    pintar('<div class="aviso a-err">' + esc(r.error) + '</div><button class="b-ghost" id="bV">Volver</button>');
+    return $('bV').onclick = function () { pantallaInicio(); };
+  }
+  if (!r.plantillas.length) {
+    pintar('<div class="aviso a-warn">Todavía no hay plantillas cargadas.</div>' +
+           '<button class="b-ghost" id="bV">Volver</button>');
+    return $('bV').onclick = function () { pantallaInicio(); };
+  }
+
+  var filas = r.plantillas.map(function (x) {
+    return '<button class="fila-lote" data-plant="' + esc(x.plantilla) + '">' +
+      '<span class="t"><span class="n">' + esc(x.plantilla) + '</span>' +
+      '<span class="c">' + x.items + ' renglones · ' + x.resueltos + ' con clave</span></span>' +
+      (x.pendientes
+        ? '<span class="pill p-warn">faltan ' + x.pendientes + '</span>'
+        : '<span class="pill p-ok">lista</span>') +
+      '</button>';
+  }).join('');
+
+  pintar(
+    (r.total_pendientes
+      ? '<div class="aviso a-warn"><b>Faltan ' + r.total_pendientes + ' renglones por amarrar al catálogo.</b><br>' +
+        'Mientras un renglón no tenga clave, ese insumo no se puede comparar contra lo que ' +
+        'de verdad se consumió.</div>'
+      : '<div class="aviso a-ok">Todos los renglones tienen clave del catálogo.</div>') +
+    '<div class="card"><h3>' + r.plantillas.length + ' plantillas · ' + r.total_items + ' renglones</h3>' +
+    '<p class="mini">Toca una para ver sus renglones y amarrar los que falten.</p>' +
+    filas + '</div>' +
+    '<button class="b-ghost" id="bV">Volver</button>');
+
+  Array.prototype.forEach.call(document.querySelectorAll('.fila-lote'), function (b) {
+    var quien = b.getAttribute('data-plant');
+    b.onclick = function () { pantallaPlantilla(quien); };
+  });
+  $('bV').onclick = function () { pantallaInicio(); };
+}
+
+async function pantallaPlantilla(nombre, soloPendientes) {
+  encabezado(nombre, 'Renglones de la plantilla');
+  pintar('<div class="card"><p class="sub">Cargando…</p></div>');
+  var r;
+  try { r = await enviar({ accion: 'plantillas', plantilla: nombre }, true); }
+  catch (e) {
+    pintar('<div class="aviso a-err">Sin conexión.</div><button class="b-ghost" id="bV">Volver</button>');
+    return $('bV').onclick = function () { pantallaPlantillas(); };
+  }
+  if (!r.ok) {
+    pintar('<div class="aviso a-err">' + esc(r.error) + '</div><button class="b-ghost" id="bV">Volver</button>');
+    return $('bV').onclick = function () { pantallaPlantillas(); };
+  }
+
+  var ver = soloPendientes ? r.items.filter(function (x) { return !x.resuelto; }) : r.items;
+  var porCat = {}, orden = [];
+  ver.forEach(function (x) {
+    var k = x.categoria || 'OTROS';
+    if (!porCat[k]) { porCat[k] = []; orden.push(k); }
+    porCat[k].push(x);
+  });
+
+  var cuerpo = orden.map(function (k) {
+    return '<div class="sub-t">' + esc(k) + '</div>' +
+      porCat[k].map(function (x) {
+        return '<button class="fila-lote" data-item="' + esc(x.item) + '">' +
+          '<span class="t"><span class="n">' + esc(x.item) +
+          (x.cantidad ? ' <b>× ' + esc(x.cantidad) + '</b>' : '') + '</span>' +
+          '<span class="c">' + (x.resuelto
+            ? esc(x.sku) + ' · ' + esc(x.nombre_catalogo)
+            : (x.error ? esc(x.error) : 'sin clave del catálogo')) + '</span></span>' +
+          (x.resuelto ? '<span class="pill p-ok">ok</span>'
+                      : '<span class="pill p-warn">amarrar</span>') +
+          '</button>';
+      }).join('');
+  }).join('');
+
+  pintar(
+    '<div class="card"><h3>' + r.items.length + ' renglones · ' + r.pendientes + ' por amarrar</h3>' +
+    '<p class="mini">La cantidad es lo que el procedimiento necesita, definido por criterio ' +
+    'quirúrgico — no el promedio de lo que se ha consumido.</p>' +
+    '<div class="b-fila">' +
+    '<button class="' + (soloPendientes ? 'b-ghost' : 'b-dark') + '" id="bTodos">Ver todos</button>' +
+    '<button class="' + (soloPendientes ? 'b-dark' : 'b-ghost') + '" id="bPend">Sólo los que faltan</button>' +
+    '</div></div>' +
+    '<div class="card">' + (cuerpo || '<p class="sub centro">Nada que mostrar aquí.</p>') + '</div>' +
+    '<button class="b-ghost" id="bV">Volver a plantillas</button>');
+
+  $('bTodos').onclick = function () { pantallaPlantilla(nombre, false); };
+  $('bPend').onclick = function () { pantallaPlantilla(nombre, true); };
+  $('bV').onclick = function () { pantallaPlantillas(); };
+  Array.prototype.forEach.call(document.querySelectorAll('.fila-lote'), function (b) {
+    var it = b.getAttribute('data-item');
+    b.onclick = function () {
+      var x = null;
+      r.items.forEach(function (y) { if (y.item === it) x = y; });
+      if (x) pantallaPlantillaAmarrar(nombre, x, soloPendientes);
+    };
+  });
+}
+
+/* Amarrar un renglón: se busca en el catálogo igual que en cualquier otra
+   pantalla, con las mismas letras, y se propone lo más parecido. La
+   propuesta nunca se aplica sola — la escoge quien sabe qué es. */
+function pantallaPlantillaAmarrar(plantilla, item, soloPendientes) {
+  encabezado(item.item, 'Amarrar al catálogo');
+  var lista = ((estado.cat && estado.cat.catalogo) || []).slice();
+
+  function sugerencias(texto) {
+    var q = plano(texto || '');
+    if (!q) return [];
+    var qt = q.split(' ').filter(function (t) { return t.length > 1; });
+    return lista.map(function (s) {
+      var heno = plano(s.sku + ' ' + s.nombre + ' ' + (s.presentacion || ''));
+      var hit = 0;
+      qt.forEach(function (t) { if (heno.indexOf(t) >= 0) hit++; });
+      return { s: s, p: qt.length ? hit / qt.length : 0 };
+    }).filter(function (x) { return x.p > 0.32; })
+      .sort(function (a, b) { return b.p - a.p; })
+      .slice(0, 12).map(function (x) { return x.s; });
+  }
+
+  function pintarLista(texto) {
+    var props = sugerencias(texto);
+    $('sugs').innerHTML = props.length
+      ? props.map(function (s) {
+          return '<button class="fila-lote" data-sku="' + esc(s.sku) + '">' +
+            '<span class="t"><span class="n">' + esc(s.nombre) + '</span>' +
+            '<span class="c">' + esc(s.sku) + (s.presentacion ? ' · ' + esc(s.presentacion) : '') +
+            '</span></span>' +
+            (String(s.controlado).toUpperCase() === 'SI' ? '<span class="pill p-warn">llave</span>' : '') +
+            '</button>';
+        }).join('')
+      : '<p class="sub centro">Nada parecido. Prueba con menos letras.</p>';
+    Array.prototype.forEach.call($('sugs').querySelectorAll('.fila-lote'), function (b) {
+      b.onclick = function () { amarrar(b.getAttribute('data-sku')); };
+    });
+  }
+
+  async function amarrar(sku) {
+    pintar('<div class="card"><p class="sub">Guardando…</p></div>');
+    try {
+      var r = await enviar({ accion: 'plantilla_item_sku', plantilla: plantilla,
+                             item: item.item, sku: sku }, true);
+      if (!r.ok) { alertar(r.error); return pantallaPlantilla(plantilla, soloPendientes); }
+      pantallaPlantilla(plantilla, soloPendientes);
+    } catch (e) {
+      alertar('Sin conexión. No se guardó.');
+      pantallaPlantilla(plantilla, soloPendientes);
+    }
+  }
+
+  pintar(
+    '<div class="card">' +
+    '<div class="lista">' +
+    '<div class="item"><div class="l"><div>Renglón de la plantilla</div>' +
+    '<div class="mini">' + esc(plantilla) + ' · ' + esc(item.categoria || '') + '</div></div>' +
+    (item.cantidad ? '<span class="pill p-neutral">× ' + esc(item.cantidad) + '</span>' : '') + '</div>' +
+    (item.resuelto
+      ? '<div class="item"><div class="l"><div>Amarrado hoy a</div>' +
+        '<div class="mini">' + esc(item.nombre_catalogo) + '</div></div>' +
+        '<span class="pill p-ok">' + esc(item.sku) + '</span></div>'
+      : '') +
+    '</div></div>' +
+
+    '<div class="card">' +
+    '<div class="campo"><label>Buscar en el catálogo</label>' +
+    '<input id="qCat" type="search" value="' + esc(item.item) + '"></div>' +
+    '<p class="mini">Escoge el insumo del catálogo que corresponde a este renglón. ' +
+    'Si no existe todavía, hay que darlo de alta primero.</p>' +
+    '<div id="sugs"></div></div>' +
+
+    '<button class="b-ghost" id="bV">Volver sin amarrar</button>');
+
+  $('qCat').oninput = function () { pintarLista(this.value); };
+  $('bV').onclick = function () { pantallaPlantilla(plantilla, soloPendientes); };
+  pintarLista(item.item);
 }
 
 /* =================================================================
