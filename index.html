@@ -205,6 +205,12 @@ button+button{margin-top:9px}
   text-transform:uppercase;color:var(--accent-deep);margin:12px 0 2px;
   border-bottom:1px solid var(--rule-soft);padding-bottom:4px}
 .sub-t:first-child{margin-top:0}
+/* Los labels de los campos van en versalitas; éste es una frase y tiene que
+   leerse como frase, no a gritos. */
+label.check{display:flex;align-items:flex-start;gap:9px;font-size:.92rem;line-height:1.4;
+  cursor:pointer;color:var(--ink);font-family:'Jost',-apple-system,sans-serif;
+  text-transform:none;letter-spacing:normal;font-weight:400}
+label.check input{width:19px;height:19px;margin:1px 0 0;flex:0 0 auto;accent-color:var(--ink)}
 .mapeo{border-top:1px solid var(--rule-soft);padding:9px 0}
 .mapeo:first-of-type{border-top:0}
 .mapeo .cl{font-family:'IBM Plex Mono',monospace;font-size:.74rem;display:block;
@@ -1863,10 +1869,11 @@ function pantallaPlantillaAmarrar(plantilla, item, soloPendientes) {
   }
 
   async function amarrar(sku) {
+    var todas = $('aTodas') && $('aTodas').checked ? 'SI' : 'NO';
     pintar('<div class="card"><p class="sub">Guardando…</p></div>');
     try {
       var r = await enviar({ accion: 'plantilla_item_sku', plantilla: plantilla,
-                             item: item.item, sku: sku }, true);
+                             item: item.item, sku: sku, todas: todas }, true);
       if (!r.ok) { alertar(r.error); return pantallaPlantilla(plantilla, soloPendientes); }
       pantallaPlantilla(plantilla, soloPendientes);
     } catch (e) {
@@ -1887,6 +1894,15 @@ function pantallaPlantillaAmarrar(plantilla, item, soloPendientes) {
         '<span class="pill p-ok">' + esc(item.sku) + '</span></div>'
       : '') +
     '</div></div>' +
+
+    ((item.en_plantillas || 1) > 1
+      ? '<div class="card"><label class="check"><input type="checkbox" id="aTodas" checked> ' +
+        'Aplicar también a las otras ' + (item.en_plantillas - 1) + ' plantillas que piden ' +
+        '“' + esc(item.item) + '”</label>' +
+        '<p class="mini">Es la misma decisión: a qué insumo del catálogo corresponde este ' +
+        'nombre. Desmárcalo sólo si en algún procedimiento significa otra cosa. ' +
+        'La cantidad no se copia — esa sí es de cada plantilla.</p></div>'
+      : '') +
 
     '<div class="card">' +
     '<div class="campo"><label>Buscar en el catálogo</label>' +
