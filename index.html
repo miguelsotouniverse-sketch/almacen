@@ -1744,7 +1744,8 @@ async function pantallaPlantillas() {
   var filas = r.plantillas.map(function (x) {
     return '<button class="fila-lote" data-plant="' + esc(x.plantilla) + '">' +
       '<span class="t"><span class="n">' + esc(x.plantilla) + '</span>' +
-      '<span class="c">' + x.items + ' renglones · ' + x.resueltos + ' con clave</span></span>' +
+      '<span class="c">' + x.items + ' renglones · ' + x.resueltos + ' resueltos' +
+      (x.notas ? ' (' + x.notas + ' sin clave a propósito)' : '') + '</span></span>' +
       (x.pendientes
         ? '<span class="pill p-warn">faltan ' + x.pendientes + '</span>'
         : '<span class="pill p-ok">lista</span>') +
@@ -1797,11 +1798,14 @@ async function pantallaPlantilla(nombre, soloPendientes) {
         return '<button class="fila-lote" data-item="' + esc(x.item) + '">' +
           '<span class="t"><span class="n">' + esc(x.item) +
           (x.cantidad ? ' <b>× ' + esc(x.cantidad) + '</b>' : '') + '</span>' +
-          '<span class="c">' + (x.resuelto
-            ? esc(x.sku) + ' · ' + esc(x.nombre_catalogo)
-            : (x.error ? esc(x.error) : 'sin clave del catálogo')) + '</span></span>' +
-          (x.resuelto ? '<span class="pill p-ok">ok</span>'
-                      : '<span class="pill p-warn">amarrar</span>') +
+          '<span class="c">' + (x.es_nota
+            ? 'no es material de almacén'
+            : (x.resuelto
+              ? esc(x.sku) + ' · ' + esc(x.nombre_catalogo)
+              : (x.error ? esc(x.error) : 'sin clave del catálogo'))) + '</span></span>' +
+          (x.es_nota ? '<span class="pill p-neutral">nota</span>'
+            : (x.resuelto ? '<span class="pill p-ok">ok</span>'
+                          : '<span class="pill p-warn">amarrar</span>')) +
           '</button>';
       }).join('');
   }).join('');
@@ -1868,6 +1872,17 @@ function pantallaPlantillaAmarrar(plantilla, item, soloPendientes) {
     });
   }
 
+  async function marcarNota() {
+    var todas = $('aTodas') && $('aTodas').checked ? 'SI' : 'NO';
+    pintar('<div class="card"><p class="sub">Guardando…</p></div>');
+    try {
+      var r = await enviar({ accion: 'plantilla_item_sku', plantilla: plantilla,
+                             item: item.item, tipo: 'NOTA', todas: todas }, true);
+      if (!r.ok) alertar(r.error);
+    } catch (e) { alertar('Sin conexión. No se guardó.'); }
+    pantallaPlantilla(plantilla, soloPendientes);
+  }
+
   async function amarrar(sku) {
     var todas = $('aTodas') && $('aTodas').checked ? 'SI' : 'NO';
     pintar('<div class="card"><p class="sub">Guardando…</p></div>');
@@ -1911,8 +1926,19 @@ function pantallaPlantillaAmarrar(plantilla, item, soloPendientes) {
     'Si no existe todavía, hay que darlo de alta primero.</p>' +
     '<div id="sugs"></div></div>' +
 
+    '<div class="card"><h3>¿No sale del almacén?</h3>' +
+    '<p class="sub">Algunos renglones de la lista de papel no son material que el almacén ' +
+    'surta — el oxígeno de la toma mural, por ejemplo. Sirven de recordatorio al armar la ' +
+    'caja, pero no tienen clave.</p>' +
+    '<button class="b-dark" id="bNota">No es material de almacén</button></div>' +
+
     '<button class="b-ghost" id="bV">Volver sin amarrar</button>');
 
+  $('bNota').onclick = function () {
+    if (!confirm('“' + item.item + '” va a dejar de contar como pendiente y se va a quedar ' +
+                 'en la lista como recordatorio, sin clave. ¿Es correcto?')) return;
+    marcarNota();
+  };
   $('qCat').oninput = function () { pintarLista(this.value); };
   $('bV').onclick = function () { pantallaPlantilla(plantilla, soloPendientes); };
   pintarLista(item.item);
