@@ -570,12 +570,18 @@ function pantallaInicio() {
 
     '<div class="card"><h3>Plantillas</h3>' +
     '<p class="sub">Qué lleva cada procedimiento. Es la medida contra la que se compara lo que de verdad consumió una caja.</p>' +
-    '<button class="b-dark" id="bPlant">Ver plantillas</button></div>' +
+    '<div class="b-fila">' +
+    '<button class="b-dark" id="bArmar">¿Se puede armar?</button>' +
+    '<button class="b-ghost" id="bPlant">Ver plantillas</button></div>' +
+    '<p class="mini">Una plantilla completa no quiere decir que el material esté. «¿Se puede armar?» la cruza contra la existencia de hoy.</p></div>' +
 
     (String(estado.sesion && estado.sesion.rol).toUpperCase() === 'DIRECTOR'
       ? '<div class="card"><h3>Folios del catálogo</h3>' +
         '<p class="sub">El catálogo trae dos numeraciones a la vez: MED-46 es diclofenaco y MED-046 es tramadol. Homologar deja todo en tres dígitos.</p>' +
-        '<button class="b-dark" id="bFolios">Ver el plan de homologación</button></div>'
+        '<button class="b-dark" id="bFolios">Ver el plan de homologación</button>' +
+        '<div class="espacio"></div>' +
+        '<p class="sub">Y trae el mismo insumo dado de alta dos veces: el genérico que sembró el catálogo y el que de verdad está en el anaquel.</p>' +
+        '<button class="b-ghost" id="bGem">Buscar claves gemelas</button></div>'
       : '') +
 
     '<div class="card"><div class="lista">' +
@@ -603,7 +609,9 @@ function pantallaInicio() {
   $('bLotes').onclick = function () { pantallaLotes(); };
   $('bSinFecha').onclick = function () { pantallaSinFecha(); };
   $('bPlant').onclick = function () { pantallaPlantillas(); };
+  $('bArmar').onclick = function () { pantallaSurtido(); };
   if ($('bFolios')) $('bFolios').onclick = function () { pantallaHomologarFolios(); };
+  if ($('bGem')) $('bGem').onclick = function () { pantallaGemelas(); };
   $('bActivos').onclick = function () { location.href = '/activos/'; };
   $('bSalir').onclick = function () { estado.sesion = null; escribir(SES_KEY, null); pantallaLogin(); };
   if ($('bReint')) $('bReint').onclick = async function () {
@@ -1722,6 +1730,223 @@ function plano(s) {
    compararse con nada: por eso la pantalla empieza por lo que falta
    amarrar, y no por la lista completa.
    ================================================================= */
+/* =================================================================
+   Se puede armar — plantilla contra existencia
+
+   Una plantilla "lista" sólo quiere decir que todos sus renglones tienen
+   clave. No quiere decir que el material esté. Esta pantalla contesta la
+   única pregunta que importa la noche anterior: ¿se puede armar esta caja
+   mañana, sí o no, y si no, qué falta exactamente?
+   ================================================================= */
+var SURTIDO_PILL = {
+  COMPLETO:       'p-ok',
+  NO_ALCANZA:     'p-warn',
+  SIN_EXISTENCIA: 'p-crit',
+  CLAVE_MUERTA:   'p-crit',
+  SIN_CLAVE:      'p-warn',
+  NOTA:           'p-neutral'
+};
+var SURTIDO_DONDE = {
+  CLAVE_MUERTA:   'Se arregla en el catálogo',
+  SIN_EXISTENCIA: 'Se arregla en el anaquel',
+  NO_ALCANZA:     'Se arregla en el anaquel',
+  SIN_CLAVE:      'Se arregla en la plantilla',
+  NOTA:           'No sale del almacén'
+};
+
+async function pantallaSurtido() {
+  encabezado('Se puede armar', 'Plantilla contra existencia de hoy');
+  pintar('<div class="card"><p class="sub">Cargando…</p></div>');
+  var r;
+  try { r = await enviar({ accion: 'plantilla_surtido' }, true); }
+  catch (e) {
+    pintar('<div class="aviso a-err">Sin conexión.</div><button class="b-ghost" id="bV">Volver</button>');
+    return $('bV').onclick = function () { pantallaInicio(); };
+  }
+  if (!r.ok) {
+    pintar('<div class="aviso a-err">' + esc(r.error) + '</div><button class="b-ghost" id="bV">Volver</button>');
+    return $('bV').onclick = function () { pantallaInicio(); };
+  }
+
+  var filas = r.plantillas.map(function (x) {
+    var motivos = [];
+    if (x.clave_muerta)   motivos.push(x.clave_muerta + ' clave muerta');
+    if (x.sin_existencia) motivos.push(x.sin_existencia + ' en cero');
+    if (x.no_alcanza)     motivos.push(x.no_alcanza + ' no alcanza');
+    if (x.sin_clave)      motivos.push(x.sin_clave + ' sin clave');
+    return '<button class="fila-lote" data-plant="' + esc(x.plantilla) + '">' +
+      '<span class="t"><span class="n">' + esc(x.plantilla) + '</span>' +
+      '<span class="c">' + x.items + ' renglones' +
+      (motivos.length ? ' · ' + esc(motivos.join(' · ')) : ' · completa') + '</span></span>' +
+      (x.bloqueados
+        ? '<span class="pill p-crit">faltan ' + x.bloqueados + '</span>'
+        : '<span class="pill p-ok">se arma</span>') +
+      '</button>';
+  }).join('');
+
+  pintar(
+    (r.total_bloqueados
+      ? '<div class="aviso a-warn"><b>' + r.surtibles + ' de ' + r.plantillas.length +
+        ' plantillas se pueden armar hoy.</b><br>' +
+        'Hay ' + r.total_bloqueados + ' renglones sin con qué surtirse. Que una plantilla ' +
+        'esté amarrada al 100% no quiere decir que el material esté en el anaquel.</div>'
+      : '<div class="aviso a-ok">Todas las plantillas se pueden armar con lo que hay hoy.</div>') +
+    '<div class="card"><h3>' + r.plantillas.length + ' plantillas · ' + r.total_items + ' renglones</h3>' +
+    '<p class="mini">Toca una para ver renglón por renglón qué falta y dónde se arregla.</p>' +
+    filas + '</div>' +
+    '<button class="b-ghost" id="bV">Volver</button>');
+
+  Array.prototype.forEach.call(document.querySelectorAll('.fila-lote'), function (b) {
+    var quien = b.getAttribute('data-plant');
+    b.onclick = function () { pantallaSurtidoDetalle(quien); };
+  });
+  $('bV').onclick = function () { pantallaInicio(); };
+}
+
+async function pantallaSurtidoDetalle(nombre) {
+  encabezado(nombre, 'Qué falta para armarla');
+  pintar('<div class="card"><p class="sub">Cargando…</p></div>');
+  var r;
+  try { r = await enviar({ accion: 'plantilla_surtido', plantilla: nombre }, true); }
+  catch (e) {
+    pintar('<div class="aviso a-err">Sin conexión.</div><button class="b-ghost" id="bV">Volver</button>');
+    return $('bV').onclick = function () { pantallaSurtido(); };
+  }
+  if (!r.ok) {
+    pintar('<div class="aviso a-err">' + esc(r.error) + '</div><button class="b-ghost" id="bV">Volver</button>');
+    return $('bV').onclick = function () { pantallaSurtido(); };
+  }
+
+  /* Agrupados por motivo, no por categoría: aquí no se busca un insumo,
+     se reparte trabajo. Cada grupo lo resuelve una persona distinta. */
+  var grupos = {}, orden = [];
+  r.items.forEach(function (x) {
+    if (!grupos[x.estado]) { grupos[x.estado] = []; orden.push(x.estado); }
+    grupos[x.estado].push(x);
+  });
+
+  var cuerpo = orden.map(function (e) {
+    var titulo = { CLAVE_MUERTA: 'Apuntan a una clave que ya no existe',
+                   SIN_EXISTENCIA: 'La clave existe, el saldo está en cero',
+                   NO_ALCANZA: 'Hay, pero no alcanza',
+                   SIN_CLAVE: 'Todavía sin amarrar',
+                   NOTA: 'No es material de almacén',
+                   COMPLETO: 'Alcanza' }[e] || e;
+    var filas = grupos[e].map(function (x) {
+      var der = '';
+      if (e === 'NO_ALCANZA') der = '<span class="pill p-warn">faltan ' + x.faltan + '</span>';
+      else if (e === 'COMPLETO') der = '<span class="pill p-ok">' + x.hay + '</span>';
+      else der = '<span class="pill ' + SURTIDO_PILL[e] + '">' + (x.pide || '—') + '</span>';
+      return '<div class="fila-lote">' +
+        '<span class="t"><span class="n">' + esc(x.item) + '</span>' +
+        '<span class="c">' + (x.sku ? esc(x.sku) + ' · ' : '') +
+        'pide ' + x.pide + (x.hay === '' ? '' : ' · hay ' + x.hay) + '</span></span>' + der + '</div>';
+    }).join('');
+    return '<div class="card"><div class="sub-t">' + esc(titulo) + '</div>' +
+      (SURTIDO_DONDE[e] ? '<p class="mini">' + SURTIDO_DONDE[e] + '</p>' : '') +
+      filas + '</div>';
+  }).join('');
+
+  pintar(
+    (r.bloqueados
+      ? '<div class="aviso a-warn"><b>' + r.bloqueados + ' renglones impiden armar esta caja.</b></div>'
+      : '<div class="aviso a-ok">Esta caja se puede armar con lo que hay hoy.</div>') +
+    cuerpo +
+    '<button class="b-dark" id="bAmarrar">Ver los renglones de la plantilla</button>' +
+    '<button class="b-ghost" id="bV">Volver</button>');
+
+  $('bAmarrar').onclick = function () { pantallaPlantilla(nombre); };
+  $('bV').onclick = function () { pantallaSurtido(); };
+}
+
+/* =================================================================
+   Claves gemelas
+
+   Un mismo insumo dado de alta dos veces: el genérico que sembró el
+   catálogo y el que de verdad está en el anaquel. El genérico nunca va a
+   tener existencia, y las plantillas quedaron amarradas justo a él.
+   ================================================================= */
+async function pantallaGemelas() {
+  encabezado('Claves gemelas', 'Un insumo dado de alta dos veces');
+  pintar('<div class="card"><p class="sub">Buscando…</p></div>');
+  var r;
+  try { r = await enviar({ accion: 'duplicados_plan' }, true); }
+  catch (e) {
+    pintar('<div class="aviso a-err">Sin conexión.</div><button class="b-ghost" id="bV">Volver</button>');
+    return $('bV').onclick = function () { pantallaInicio(); };
+  }
+  if (!r.ok) {
+    pintar('<div class="aviso a-err">' + esc(r.error) + '</div><button class="b-ghost" id="bV">Volver</button>');
+    return $('bV').onclick = function () { pantallaInicio(); };
+  }
+  if (!r.pares.length) {
+    pintar('<div class="aviso a-ok">No hay claves gemelas por fusionar.</div>' +
+           '<button class="b-ghost" id="bV">Volver</button>');
+    return $('bV').onclick = function () { pantallaInicio(); };
+  }
+
+  estado.gemelas = {};
+  var tarjetas = r.pares.map(function (p, i) {
+    estado.gemelas[p.retirar] = p.confianza === 'seguro' ? p.sugerido : '';
+    var ops = p.candidatos.map(function (c) {
+      return '<option value="' + esc(c.sku) + '"' +
+        (c.sku === p.sugerido && p.confianza === 'seguro' ? ' selected' : '') + '>' +
+        esc(c.sku + ' · ' + c.nombre) + '</option>';
+    }).join('');
+    return '<div class="card">' +
+      '<div class="sub-t">' + esc(p.retirar) + '</div>' +
+      '<h3>' + esc(p.retirar_nombre) + '</h3>' +
+      '<p class="mini">Sin saldo, sin lote y sin un solo movimiento' +
+      (p.en_plantillas ? ' · usada en ' + p.en_plantillas + ' renglón(es) de plantilla' : '') + '.</p>' +
+      (p.confianza === 'seguro'
+        ? '<p class="sub">Se fusiona en:</p>'
+        : '<div class="aviso a-warn">Hay más de un candidato y se distinguen por la medida o la talla. ' +
+          'Eso lo sabe quien abre la caja, no el sistema. Elige o déjalo en blanco.</div>') +
+      '<div class="campo"><select data-gem="' + esc(p.retirar) + '">' +
+      (p.confianza === 'seguro' ? '' : '<option value="">— no fusionar por ahora —</option>') +
+      ops + '</select></div></div>';
+  }).join('');
+
+  pintar(
+    '<div class="aviso a-warn"><b>' + r.pares.length + ' claves sin existencia tienen una gemela viva.</b><br>' +
+    'Fusionar reapunta los renglones de plantilla a la clave buena y deja la vieja inactiva ' +
+    '— no la borra. Sólo aparecen aquí claves a las que nunca les pasó nada: cero lotes, ' +
+    'cero movimientos. El kardex no se toca.</div>' +
+    tarjetas +
+    '<button class="b-primary" id="bFus">Fusionar las seleccionadas</button>' +
+    '<button class="b-ghost" id="bV">Volver</button>');
+
+  Array.prototype.forEach.call(document.querySelectorAll('select[data-gem]'), function (s) {
+    s.onchange = function () { estado.gemelas[s.getAttribute('data-gem')] = s.value; };
+  });
+
+  $('bFus').onclick = async function () {
+    var pares = [];
+    Object.keys(estado.gemelas).forEach(function (k) {
+      if (estado.gemelas[k]) pares.push({ retirar: k, queda: estado.gemelas[k] });
+    });
+    if (!pares.length) return alertar('No hay ninguna seleccionada.');
+
+    /* Dos toques a propósito, sin diálogo del navegador: retirar una clave
+       del catálogo no debería pasar por un resbalón del dedo. */
+    if (this.getAttribute('data-listo') !== 'si') {
+      this.setAttribute('data-listo', 'si');
+      this.className = 'b-dark';
+      this.textContent = 'Confirmar: fusionar ' + pares.length + ' clave(s)';
+      alertar('Toca otra vez para confirmar. La clave vieja queda inactiva, no se borra.');
+      return;
+    }
+    this.disabled = true; this.textContent = 'Fusionando…';
+    var res;
+    try { res = await enviar({ accion: 'duplicados_fusionar', confirmar: 'FUSIONAR', pares: pares }, true); }
+    catch (e) { this.disabled = false; this.textContent = 'Fusionar las seleccionadas'; return alertar('Sin conexión.'); }
+    if (!res.ok) { this.disabled = false; this.textContent = 'Fusionar las seleccionadas'; return alertar(res.error); }
+    alertar(res.fusionadas + ' clave(s) fusionadas.');
+    pantallaGemelas();
+  };
+  $('bV').onclick = function () { pantallaInicio(); };
+}
+
 async function pantallaPlantillas() {
   encabezado('Plantillas', 'Qué lleva cada procedimiento');
   pintar('<div class="card"><p class="sub">Cargando…</p></div>');
