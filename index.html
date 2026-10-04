@@ -575,6 +575,10 @@ function pantallaInicio() {
     '<button class="b-ghost" id="bPlant">Ver plantillas</button></div>' +
     '<p class="mini">Una plantilla completa no quiere decir que el material esté. «¿Se puede armar?» la cruza contra la existencia de hoy.</p></div>' +
 
+    '<div class="card"><h3>Lista de compra</h3>' +
+    '<p class="sub">Qué pedir para poder armar las cajas, y qué se va a vencer antes de usarse.</p>' +
+    '<button class="b-dark" id="bCompra">Ver la lista de compra</button></div>' +
+
     (String(estado.sesion && estado.sesion.rol).toUpperCase() === 'DIRECTOR'
       ? '<div class="card"><h3>Folios del catálogo</h3>' +
         '<p class="sub">El catálogo trae dos numeraciones a la vez: MED-46 es diclofenaco y MED-046 es tramadol. Homologar deja todo en tres dígitos.</p>' +
@@ -610,6 +614,7 @@ function pantallaInicio() {
   $('bSinFecha').onclick = function () { pantallaSinFecha(); };
   $('bPlant').onclick = function () { pantallaPlantillas(); };
   $('bArmar').onclick = function () { pantallaSurtido(); };
+  $('bCompra').onclick = function () { pantallaCompra(); };
   if ($('bFolios')) $('bFolios').onclick = function () { pantallaHomologarFolios(); };
   if ($('bGem')) $('bGem').onclick = function () { pantallaGemelas(); };
   $('bActivos').onclick = function () { location.href = '/activos/'; };
@@ -1730,6 +1735,135 @@ function plano(s) {
    compararse con nada: por eso la pantalla empieza por lo que falta
    amarrar, y no por la lista completa.
    ================================================================= */
+/* =================================================================
+   Lista de compra
+
+   Tres cosas distintas, separadas a propósito: lo que impide operar hoy,
+   lo que alcanza para una cirugía pero no para el colchón, y lo que se va
+   a vencer. Mezclarlas convierte la lista en ruido y nadie la usa.
+   ================================================================= */
+var COLCHON_KEY = 'msu_alm_colchon';
+
+function colchonGuardado() {
+  var v = parseInt(leer(COLCHON_KEY, 2), 10);
+  return (v && v > 0) ? v : 2;
+}
+
+async function pantallaCompra(colchon) {
+  var n = colchon || colchonGuardado();
+  encabezado('Lista de compra', 'Qué pedir y qué se va a vencer');
+  pintar('<div class="card"><p class="sub">Calculando…</p></div>');
+  var r;
+  try { r = await enviar({ accion: 'compra_lista', colchon: n }, true); }
+  catch (e) {
+    pintar('<div class="aviso a-err">Sin conexión.</div><button class="b-ghost" id="bV">Volver</button>');
+    return $('bV').onclick = function () { pantallaInicio(); };
+  }
+  if (!r.ok) {
+    pintar('<div class="aviso a-err">' + esc(r.error) + '</div><button class="b-ghost" id="bV">Volver</button>');
+    return $('bV').onclick = function () { pantallaInicio(); };
+  }
+  escribir(COLCHON_KEY, n);
+
+  function renglon(x, modo) {
+    var der = modo === 'bloquea'
+      ? '<span class="pill p-crit">pedir ' + x.comprar + '</span>'
+      : '<span class="pill p-warn">pedir ' + x.comprar + '</span>';
+    return '<div class="fila-lote">' +
+      '<span class="t"><span class="n">' + esc(x.nombre) +
+      (x.controlado ? ' <span class="pill p-crit">controlado</span>' : '') + '</span>' +
+      '<span class="c">' + esc(x.sku) + ' · hay ' + x.hay + ' · una caja pide ' + x.pide_una_caja +
+      ' · ' + esc(x.plantillas.join(', ')) + '</span></span>' + der + '</div>';
+  }
+
+  var sel = [1, 2, 3, 4].map(function (v) {
+    return '<option value="' + v + '"' + (v === r.colchon ? ' selected' : '') + '>' +
+      v + (v === 1 ? ' cirugía' : ' cirugías') + '</option>';
+  }).join('');
+
+  var cad = r.por_caducar.map(function (x) {
+    return '<div class="fila-lote">' +
+      '<span class="t"><span class="n">' + esc(x.nombre) + '</span>' +
+      '<span class="c">' + esc(x.sku) + ' · ' + esc(x.lote_id) + ' · ' + x.cantidad + ' pza · ' +
+      esc(x.ubic_id) + '</span></span>' +
+      '<span class="pill ' + (x.vencido ? 'p-crit' : (x.dias <= 30 ? 'p-crit' : 'p-warn')) + '">' +
+      (x.vencido ? 'vencido' : x.dias + ' días') + '</span></div>';
+  }).join('');
+
+  pintar(
+    '<div class="card"><h3>Para cuántas cirugías quiero tener</h3>' +
+    '<p class="mini">El mínimo sale de lo que pide una plantilla, que es el único dato cierto mientras ' +
+    'no haya historia de consumo. El colchón se cuenta en cirugías, no en piezas.</p>' +
+    '<div class="campo"><select id="cCol">' + sel + '</select></div></div>' +
+
+    (r.bloquean.length
+      ? '<div class="card"><div class="sub-t">No alcanza ni para una cirugía</div>' +
+        '<p class="mini">Esto impide armar la caja hoy.</p>' +
+        r.bloquean.map(function (x) { return renglon(x, 'bloquea'); }).join('') + '</div>'
+      : '<div class="aviso a-ok">Todo alcanza al menos para una cirugía.</div>') +
+
+    (r.bajos.length
+      ? '<div class="card"><div class="sub-t">Alcanza para una, no para el colchón</div>' +
+        '<p class="mini">Se puede operar, pero el anaquel queda en cero después.</p>' +
+        r.bajos.map(function (x) { return renglon(x, 'bajo'); }).join('') + '</div>'
+      : '') +
+
+    (r.por_caducar.length
+      ? '<div class="card"><div class="sub-t">Se vence en los próximos ' + r.horizonte + ' días</div>' +
+        '<p class="mini">Esto no falta: sobra, pero con fecha. Úsalo primero o dalo de baja a tiempo.</p>' +
+        cad + '</div>'
+      : '') +
+
+    '<button class="b-dark" id="bCopiar">Copiar la lista</button>' +
+    '<button class="b-ghost" id="bV">Volver</button>');
+
+  $('cCol').onchange = function () { pantallaCompra(parseInt(this.value, 10)); };
+
+  $('bCopiar').onclick = function () {
+    var lineas = [];
+    lineas.push('Lista de compra · almacén Zorvix · ' + hoyISO());
+    lineas.push('Para poder armar ' + r.colchon + (r.colchon === 1 ? ' cirugía' : ' cirugías') + ' sin ir a comprar.');
+    if (r.bloquean.length) {
+      lineas.push('');
+      lineas.push('URGENTE — no alcanza ni para una cirugía:');
+      r.bloquean.forEach(function (x) {
+        lineas.push('  ' + x.sku + '  ' + x.nombre + '  —  hay ' + x.hay + ', pedir ' + x.comprar);
+      });
+    }
+    if (r.bajos.length) {
+      lineas.push('');
+      lineas.push('Por reponer:');
+      r.bajos.forEach(function (x) {
+        lineas.push('  ' + x.sku + '  ' + x.nombre + '  —  hay ' + x.hay + ', pedir ' + x.comprar);
+      });
+    }
+    if (r.por_caducar.length) {
+      lineas.push('');
+      lineas.push('Se vence pronto (no es compra, es para usarlo primero):');
+      r.por_caducar.forEach(function (x) {
+        lineas.push('  ' + x.sku + '  ' + x.nombre + '  —  ' + x.cantidad + ' pza, ' + x.caducidad +
+                    (x.vencido ? ' (VENCIDO)' : ' (' + x.dias + ' días)'));
+      });
+    }
+    var txt = lineas.join('\n');
+    var ta = document.createElement('textarea');
+    ta.value = txt;
+    ta.style.cssText = 'position:fixed;left:-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    var listo = false;
+    try { listo = document.execCommand('copy'); } catch (e) { listo = false; }
+    ta.remove();
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(txt).then(function () {}, function () {});
+    }
+    alertar(listo ? 'Lista copiada. Pégala en WhatsApp o en el correo del proveedor.'
+                  : 'No se pudo copiar sola; selecciona el texto a mano.');
+  };
+
+  $('bV').onclick = function () { pantallaInicio(); };
+}
+
 /* =================================================================
    Se puede armar — plantilla contra existencia
 
