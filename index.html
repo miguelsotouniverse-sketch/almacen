@@ -825,17 +825,43 @@ function pintarTablero(t) {
    dotación sellada se cuenta aparte: existe, pero no se puede prometer.
    ================================================================= */
 
+/* Leer la existencia obliga a recorrer el kardex entero y tarda segundos.
+   Peor: si se entra aquí mientras el tablero de la portada todavía está
+   cargando, las dos peticiones se forman una detrás de otra y la primera
+   búsqueda del día se siente eterna.
+
+   Por eso lo ya leído se queda en memoria por un rato: al volver, la pantalla
+   aparece de inmediato con lo último que se supo —diciendo de cuándo es— y se
+   refresca por detrás. Nunca se inventa un dato: si no hay nada en memoria,
+   se espera, y mientras se espera se dice por qué tarda. */
+var EXIST_FRESCO_MS = 120000;
+
 async function pantallaExistencias(q, filtro) {
   encabezado('Existencias', 'Qué hay y dónde está');
-  pintar('<div class="card"><p class="sub">Cargando…</p></div>');
+  estado.existQ = String(q || '');
+  estado.existF = filtro || 'todo';
+
+  var fresco = estado.exist && estado.existAt && (Date.now() - estado.existAt) < EXIST_FRESCO_MS;
+  if (estado.exist) {
+    pintarExistencias();
+    if (fresco) return;
+  } else {
+    pintar('<div class="card"><p class="sub">Leyendo el kardex…</p>' +
+           '<p class="mini">La existencia no está guardada en ningún lado: se suma movimiento ' +
+           'por movimiento cada vez que se pregunta. Por eso tarda unos segundos.</p></div>');
+  }
+
   try {
     var r = await enviar({ accion: 'existencias' }, true);
-    if (!r.ok) return pintar('<div class="aviso a-err">' + esc(r.error) + '</div>');
+    if (!r.ok) {
+      if (estado.exist) return alertar(r.error);
+      return pintar('<div class="aviso a-err">' + esc(r.error) + '</div>');
+    }
     estado.exist = r.existencias;
-    estado.existQ = String(q || '');
-    estado.existF = filtro || 'todo';
+    estado.existAt = Date.now();
     pintarExistencias();
   } catch (e) {
+    if (estado.exist) return alertar('Sin conexión: esto es lo último que se supo.');
     pintar('<div class="aviso a-err">Sin conexión.</div><button class="b-ghost" id="bV">Volver</button>');
     $('bV').onclick = function () { pantallaInicio(); };
   }
@@ -946,7 +972,10 @@ function pintarExistencias() {
     chip('caducar', 'Por caducar') + chip('caja', 'En cajas') +
     chip('dotacion', 'Comprometido') + '</div>' +
     '<div class="card">' +
-    '<p class="mini">La cifra es lo que hay <b>en el anaquel</b>. Toca un renglón para ver sus lotes.</p>' +
+    '<p class="mini">La cifra es lo que hay <b>en el anaquel</b>. Toca un renglón para ver sus lotes.' +
+      (estado.existAt && (Date.now() - estado.existAt) > 15000
+        ? ' · Leído hace ' + Math.round((Date.now() - estado.existAt) / 60000) + ' min'
+        : '') + '</p>' +
     (lista.length
       ? '<div>' + lista.map(prod).join('') + '</div>'
       : '<p class="sub centro">Nada que mostrar con ese filtro.</p>') +
