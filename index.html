@@ -1048,10 +1048,13 @@ function pantallaCajaArmar(pre) {
         return '<option' + (n === pre.procedimiento ? ' selected' : '') + '>' + esc(n) + '</option>';
       }).join('') +
     '</select></div>' +
-    '<div class="campo"><label>Almacén que surte</label><select id="aAlm">' +
-      c.almacenes.map(function (a) {
-        return '<option value="' + esc(a.id) + '">' + esc(a.nombre) + '</option>'; }).join('') +
-    '</select></div>' +
+    '<div class="campo"><label>De qué almacenes se puede tomar</label>' +
+      c.almacenes.map(function (a, i) {
+        return '<label class="check"><input type="checkbox" class="aAlm" value="' + esc(a.id) + '"' +
+               (i === 0 ? ' checked' : '') + '>' + esc(a.nombre) + '</label>';
+      }).join('') +
+      '<p class="mini">El primero marcado es el almacén de la caja. Marcar varios no reparte ' +
+      'de más: toma lo que primero se vence, esté en el que esté.</p></div>' +
     '<button class="b-dark" id="bVer">Ver qué saldría</button>' +
     '<p class="mini">Primero en seco: nada se mueve hasta que lo confirmes.</p>' +
     '</div>' +
@@ -1085,20 +1088,30 @@ function pantallaCajaArmar(pre) {
 function leerCajaArmar() {
   var pac = ($('aPac').value || '').trim();
   var plant = $('aPlant').value;
-  var alm = $('aAlm').value;
+  var alms = [].map.call(document.querySelectorAll('.aAlm:checked'), function (x) { return x.value; });
   if (!pac) { alertar('Falta el paciente.'); return null; }
   if (!plant) { alertar('Falta el procedimiento.'); return null; }
-  if (!alm) { alertar('Falta el almacén.'); return null; }
+  if (!alms.length) { alertar('Marca al menos un almacén.'); return null; }
   return { paciente: pac, paciente_id: ($('aExp').value || '').trim(),
-           procedimiento: plant, almacen: alm };
+           procedimiento: plant, almacen: alms[0], almacenes: alms };
 }
 
 function pintarPrevioArmado(r, d) {
   if (!r.ok) { $('aPrev').innerHTML = '<div class="aviso a-err">' + esc(r.error) + '</div>'; return; }
 
+  var nomAlm = {};
+  ((estado.cat && estado.cat.almacenes) || []).forEach(function (a) { nomAlm[a.id] = a.nombre; });
+  var varios = (r.almacenes || []).length > 1;
+
   function fila(x, falta) {
+    /* De dónde sale sólo se dice cuando hay más de un almacén: con uno solo
+       sería repetir la misma palabra en cada renglón. */
+    var de = (varios && x.de && x.de.length)
+      ? '<div class="mini">' + x.de.map(function (u) {
+          return nFmt(u.cantidad) + ' de ' + esc(nomAlm[u.ubic_id] || u.ubic_id); }).join(' · ') + '</div>'
+      : '';
     return '<div class="item"><div class="l"><span>' + esc(x.sku || '—') + '</span>' +
-      '<div>' + esc(x.item) + '</div></div>' +
+      '<div>' + esc(x.item) + '</div>' + de + '</div>' +
       '<span class="pill ' + (falta ? 'p-crit' : 'p-ok') + '">' +
       (falta ? nFmt(x.surtido) + ' de ' + nFmt(x.pide) : nFmt(x.surtido)) + '</span></div>';
   }
