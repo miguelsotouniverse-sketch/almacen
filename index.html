@@ -667,6 +667,7 @@ function pantallaInicio() {
     '<button class="baldosa" id="bArmar">¿Se puede armar?<span class="q">Plantilla contra existencia</span></button>' +
     '<button class="baldosa" id="bCompra">Lista de compra<span class="q">Qué pedir</span></button>' +
     '<button class="baldosa" id="bDot">Carros y cajas selladas<span class="q">Urgencias</span></button>' +
+    '<button class="baldosa" id="bAgenda">Agenda<span class="q">Armar desde el caso programado</span></button>' +
     '<button class="baldosa" id="bCatalogo">Catálogo<span class="q">Qué es cada insumo</span></button>' +
     (['DIRECTOR','GERENCIA'].indexOf(String(estado.sesion && estado.sesion.rol).toUpperCase()) >= 0
       ? '<button class="baldosa ancha" id="bRevis">Por revisar' +
@@ -714,6 +715,7 @@ function pantallaInicio() {
   $('bArmar').onclick = function () { pantallaSurtido(); };
   $('bCompra').onclick = function () { pantallaCompra(); };
   $('bDot').onclick = function () { pantallaDotaciones(); };
+  $('bAgenda').onclick = function () { pantallaAgenda(); };
   $('bCatalogo').onclick = function () { pantallaCatalogo(''); };
   $('bPlant').onclick = function () { pantallaPlantillas(); };
   $('bLotes').onclick = function () { pantallaLotes(); };
@@ -1019,18 +1021,32 @@ function pintarExistencias() {
    contra el inventario real mueve inventario real.
    ================================================================= */
 
-function pantallaCajaArmar() {
+function pantallaCajaArmar(pre) {
   var c = estado.cat || { almacenes: [] };
-  encabezado('Armar caja', 'Contra la plantilla del procedimiento');
+  /* La precarga viene de la agenda: folio del caso y la plantilla ya amarrada
+     a su paquete. Se guarda en estado para que el repintado por carga de
+     plantillas no la borre. */
+  if (pre) estado.armarPre = pre;
+  pre = estado.armarPre || {};
+  encabezado('Armar caja', pre.paciente ? pre.paciente : 'Contra la plantilla del procedimiento');
   var plants = (estado.plantillasNombres || []);
+  if (pre.procedimiento && plants.indexOf(pre.procedimiento) < 0) plants = plants.concat([pre.procedimiento]);
 
   pintar(
     '<div class="card">' +
-    '<div class="campo"><label>Paciente</label><input id="aPac" placeholder="Nombre completo"></div>' +
-    '<div class="campo"><label>Expediente (opcional)</label><input id="aExp"></div>' +
+    (pre.paciente
+      ? '<div class="aviso a-info">Caso <b>' + esc(pre.paciente) + '</b> de la agenda. ' +
+        'La caja queda amarrada a ese folio, no a un nombre.</div>'
+      : '') +
+    '<div class="campo"><label>' + (pre.paciente ? 'Folio del caso' : 'Paciente') + '</label>' +
+      '<input id="aPac" placeholder="Nombre completo" value="' + esc(pre.paciente || '') + '"></div>' +
+    '<div class="campo"><label>Expediente (opcional)</label>' +
+      '<input id="aExp" value="' + esc(pre.paciente_id || '') + '"></div>' +
     '<div class="campo"><label>Procedimiento</label><select id="aPlant">' +
       '<option value="">— elige —</option>' +
-      plants.map(function (n) { return '<option>' + esc(n) + '</option>'; }).join('') +
+      plants.map(function (n) {
+        return '<option' + (n === pre.procedimiento ? ' selected' : '') + '>' + esc(n) + '</option>';
+      }).join('') +
     '</select></div>' +
     '<div class="campo"><label>Almacén que surte</label><select id="aAlm">' +
       c.almacenes.map(function (a) {
@@ -1052,7 +1068,8 @@ function pantallaCajaArmar() {
     }).catch(function () {});
   }
 
-  $('bV').onclick = function () { pantallaCajas(); };
+  $('bV').onclick = function () { estado.armarPre = null;
+    if (pre.paciente) pantallaAgenda(); else pantallaCajas(); };
   $('bVer').onclick = async function () {
     var d = leerCajaArmar();
     if (!d) return;
@@ -1119,6 +1136,7 @@ function pintarPrevioArmado(r, d) {
       var res = await enviar({ accion: 'caja_armar', caja: d }, true);
       if (!res.ok) { alertar(res.error); this.disabled = false;
                      this.textContent = 'Armar la caja y sacar el material'; return; }
+      estado.armarPre = null;
       alertar('Caja ' + res.caja_id + ' armada: ' + res.renglones_surtidos + ' renglones.');
       pantallaCajaDetalle(res.caja_id);
     } catch (e) {
@@ -1126,6 +1144,102 @@ function pintarPrevioArmado(r, d) {
       this.disabled = false; this.textContent = 'Armar la caja y sacar el material';
     }
   };
+}
+
+/* =================================================================
+   Agenda de quirófano
+   =================================================================
+   La cirugía ya está agendada antes de que nadie toque el almacén. Volver a
+   teclear el procedimiento para armar la caja es capturar dos veces lo mismo,
+   y es donde se cuela el error: la caja dice RINOPLASTIA, el caso dice
+   "Rinoplastía Ultrasónica", y después nadie sabe qué material fue de cuál.
+
+   La caja se identifica por folio de caso, no por nombre: es menos dato
+   personal paseándose por el almacén para lograr exactamente lo mismo.
+   ================================================================= */
+
+async function pantallaAgenda() {
+  encabezado('Agenda', 'Cirugías programadas');
+  pintar('<div class="card"><p class="sub">Leyendo la agenda…</p></div>');
+  try {
+    var r = await enviar({ accion: 'agenda' }, true);
+    if (!r.ok) {
+      pintar('<div class="aviso a-err">' + esc(r.error) + '</div>' +
+             '<button class="b-ghost" id="bV">Volver</button>');
+      return void ($('bV').onclick = function () { pantallaInicio(); });
+    }
+    estado.agendaPlantillas = r.plantillas || [];
+
+    function caso(c, i) {
+      var cuando = c.dias === 0 ? 'hoy' : (c.dias === 1 ? 'mañana'
+                 : (c.dias < 0 ? 'hace ' + (-c.dias) + ' d' : 'en ' + c.dias + ' d'));
+      var avisos = [];
+      if (c.implantes) avisos.push('<span class="pill p-info">implante: ' + esc(c.implantes) + '</span>');
+      if (c.aporta) avisos.push('<span class="pill p-neutral">los aporta ' + esc(c.aporta) + '</span>');
+
+      var acc;
+      if (c.caja_id) {
+        acc = '<span class="pill p-ok">' + esc(c.caja_id) + ' · ' + esc(c.caja_estado) + '</span>';
+      } else if (c.plantilla) {
+        acc = '<button class="b-primary" data-armar="' + i + '">Armar con ' + esc(c.plantilla) + '</button>';
+      } else {
+        acc = '<div class="campo"><label>Con qué plantilla se arma</label>' +
+          '<select data-pl="' + i + '"><option value="">— elige —</option>' +
+          (estado.agendaPlantillas || []).map(function (n) {
+            return '<option' + (n === c.sugerida ? ' selected' : '') + '>' + esc(n) + '</option>';
+          }).join('') + '</select></div>' +
+          (c.sugerida
+            ? '<p class="mini">Se parece a <b>' + esc(c.sugerida) + '</b> (' + c.parecido + '%), ' +
+              'pero eso es parecido de nombre, no prueba. Confírmalo y no se vuelve a preguntar ' +
+              'para este paquete.</p>'
+            : '<p class="mini">Ninguna plantilla se parece a este paquete. Elige cuál le toca.</p>') +
+          '<button class="b-dark" data-fijar="' + i + '">Amarrar paquete a esa plantilla</button>';
+      }
+
+      return '<div class="linea">' +
+        '<div class="cab"><div><div class="nm">' + esc(c.folio_caso) + ' · ' + esc(cuando) + '</div>' +
+        '<div class="datos">' + esc(c.fecha) + ' · ' + esc(c.quirofano) + ' · ' + esc(c.estatus) + '<br>' +
+        esc(c.procedimiento || c.paquete_id) + '</div></div></div>' +
+        (avisos.length ? '<div style="margin:6px 0">' + avisos.join(' ') + '</div>' : '') +
+        '<div class="dest">' + acc + '</div></div>';
+    }
+
+    pintar(
+      (r.sin_plantilla
+        ? '<div class="aviso a-warn"><b>' + r.sin_plantilla + '</b> caso(s) todavía no saben con qué plantilla se arman.</div>'
+        : '') +
+      (r.casos.length
+        ? r.casos.map(caso).join('')
+        : '<div class="card"><p class="sub centro">No hay cirugías programadas en los próximos ' +
+          r.dias + ' días.</p></div>') +
+      '<p class="mini">La agenda sólo se lee: esta app nunca escribe en AltaZorvix. ' +
+      'La caja queda amarrada al folio del caso, no al nombre del paciente.</p>' +
+      '<button class="b-ghost" id="bV">Volver</button>');
+
+    [].forEach.call(document.querySelectorAll('[data-fijar]'), function (b) {
+      b.onclick = async function () {
+        var i = +b.getAttribute('data-fijar');
+        var sel = document.querySelector('[data-pl="' + i + '"]');
+        if (!sel.value) return alertar('Elige una plantilla.');
+        b.disabled = true;
+        var res = await enviar({ accion: 'mapa_paquete',
+          paquete_id: r.casos[i].paquete_id, plantilla: sel.value }, true);
+        if (!res.ok) { alertar(res.error); b.disabled = false; return; }
+        pantallaAgenda();
+      };
+    });
+    [].forEach.call(document.querySelectorAll('[data-armar]'), function (b) {
+      b.onclick = function () {
+        var c = r.casos[+b.getAttribute('data-armar')];
+        pantallaCajaArmar({ paciente: c.folio_caso, paciente_id: c.folio_caso,
+                            procedimiento: c.plantilla });
+      };
+    });
+    $('bV').onclick = function () { pantallaInicio(); };
+  } catch (e) {
+    pintar('<div class="aviso a-err">Sin conexión.</div><button class="b-ghost" id="bV">Volver</button>');
+    $('bV').onclick = function () { pantallaInicio(); };
+  }
 }
 
 /* =================================================================
@@ -1505,7 +1619,7 @@ async function pantallaUsuarios() {
     if (!r.ok) return pintar('<div class="aviso a-err">' + esc(r.error) + '</div>' +
       '<button class="b-ghost" onclick="pantallaInicio()">Volver</button>');
 
-    var roles = ['DIRECTOR','GERENCIA','ALMACEN','ANESTESIOLOGIA','ENFERMERIA','CONSULTA'];
+    var roles = ['DIRECTOR','GERENCIA','ALMACEN','REGULATORIO','ANESTESIOLOGIA','ENFERMERIA','CONSULTA'];
 
     pintar(
       '<div class="card"><h3>' + r.usuarios.length + ' usuario(s)</h3><div class="lista">' +
