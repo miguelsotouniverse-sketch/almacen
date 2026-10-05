@@ -502,13 +502,33 @@ async function enviar(payload, sinEncolar) {
       body: JSON.stringify(payload)
     });
     var datos = await res.json();
+
+    /* Apps Script contesta un POST con un redirect, y cuando la ejecución
+       tarda más de la cuenta ese redirect cae en doGet, que devuelve la
+       ficha del servicio: {ok:true, servicio:'AlmacenGateway'}. Trae ok:true
+       y no trae nada de lo que se pidió, así que la pantalla se dibujaba
+       VACÍA —cero renglones, cero faltantes— como si la respuesta fuera
+       buena. Una caja que se ve sin faltantes porque la petición se perdió
+       es peor que un error: se arma y se va al quirófano incompleta.
+       Un POST nunca debe recibir esta ficha; si llega, la llamada falló. */
+    if (datos && datos.servicio === 'AlmacenGateway' && payload.accion !== 'ping') {
+      var perdida = new Error('El servidor tardó demasiado y no contestó. Revisa si quedó guardado antes de repetir.');
+      /* No se encola: la ficha sólo dice que la RESPUESTA se perdió, no que
+         la escritura no haya corrido. Reenviar una recepción a ciegas la
+         duplicaría. Que lo decida quien está capturando. */
+      perdida.sinRespuesta = true;
+      throw perdida;
+    }
+
     // Si la sesión murió, no tiene caso seguir: se limpia y se pide Google.
     if (datos && datos.ok === false && MOTIVOS_SESION[datos.error]) {
       cerrarSesion(MOTIVOS_SESION[datos.error]);
     }
     return datos;
   } catch (err) {
-    if (!sinEncolar && payload.encolable) { encolar(payload); return { ok: true, encolado: true }; }
+    if (!sinEncolar && payload.encolable && !err.sinRespuesta) {
+      encolar(payload); return { ok: true, encolado: true };
+    }
     throw err;
   }
 }
