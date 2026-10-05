@@ -257,6 +257,82 @@ label.check input{width:19px;height:19px;margin:1px 0 0;flex:0 0 auto;accent-col
 .folio-lote .n{font-family:'IBM Plex Mono',monospace;font-size:1.15rem;font-weight:600}
 .folio-lote .d{font-size:.8rem;color:#9AA09C;margin-top:3px}
 @media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+/* ---------- portada: tablero ----------
+   La portada anterior era nueve tarjetas con un párrafo cada una. Se leía
+   como un manual. Un manual se lee una vez; una portada se abre veinte veces
+   al día, de pie y con una mano. Lo que cambia la decisión de quien abre la
+   app son números, no explicaciones. */
+.buscador{display:flex;gap:9px;margin-bottom:14px}
+.buscador input{flex:1}
+.buscador button{width:auto;padding:12px 18px;flex:0 0 auto}
+
+.tira{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:9px;
+  margin-bottom:14px}
+.dato{background:var(--surface);border:1px solid var(--rule);border-radius:10px;
+  padding:11px 12px;text-align:left;cursor:pointer;font-family:inherit;
+  color:inherit;width:auto;display:block}
+.dato:active{background:var(--surface-2)}
+.dato .n{font-family:'IBM Plex Mono',monospace;font-size:1.5rem;line-height:1;
+  font-weight:400;display:block}
+.dato .e{display:block;font-size:.74rem;color:var(--ink-3);margin-top:5px;line-height:1.25}
+.dato.d-ok .n{color:var(--ok)}
+.dato.d-warn .n{color:var(--warn)}
+.dato.d-crit .n{color:var(--crit)}
+.dato.d-crit{border-color:rgba(163,63,48,.35);background:var(--tint-crit)}
+.dato.d-warn{border-color:rgba(181,132,43,.35)}
+
+/* Las acciones, sin párrafo. El nombre del botón tiene que bastar; si no
+   basta, el nombre está mal, no le falta un párrafo. */
+.rejilla{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px}
+.baldosa{background:var(--surface);border:1px solid var(--rule);border-radius:10px;
+  padding:14px 13px;text-align:left;cursor:pointer;font-family:inherit;color:inherit;
+  font-size:.95rem;font-weight:400;width:auto;display:block;line-height:1.3}
+.baldosa:active{background:var(--surface-2)}
+.baldosa .q{display:block;font-size:.76rem;color:var(--ink-3);margin-top:4px;font-weight:300}
+.baldosa.ancha{grid-column:1 / -1}
+.baldosa.fuerte{background:var(--ink);color:#F4F2F1;border-color:var(--ink)}
+.baldosa.fuerte .q{color:#9AA09C}
+
+details.mas{margin-bottom:14px}
+details.mas>summary{cursor:pointer;list-style:none;font-family:'IBM Plex Mono',monospace;
+  font-size:.64rem;letter-spacing:.14em;text-transform:uppercase;color:var(--accent-deep);
+  padding:9px 0;border-bottom:1px solid var(--rule-soft)}
+details.mas>summary::-webkit-details-marker{display:none}
+details.mas>summary::after{content:' +';}
+details.mas[open]>summary::after{content:' −';}
+details.mas>div{padding-top:11px}
+
+/* ---------- filtros en fichas ---------- */
+.chips{display:flex;gap:7px;overflow-x:auto;margin-bottom:12px;padding-bottom:3px;
+  -webkit-overflow-scrolling:touch}
+.chip{flex:0 0 auto;width:auto;padding:7px 13px;border-radius:999px;font-size:.82rem;
+  font-weight:400;background:var(--surface);border:1px solid var(--rule);color:var(--ink-2)}
+.chip.on{background:var(--ink);color:#F4F2F1;border-color:var(--ink)}
+.chip .c{font-family:'IBM Plex Mono',monospace;font-size:.7rem;opacity:.7;margin-left:5px}
+
+/* ---------- existencias por producto ---------- */
+.prod{border-bottom:1px solid var(--rule-soft)}
+.prod:last-child{border-bottom:0}
+.prod>button{display:flex;align-items:center;gap:11px;padding:12px 4px;width:100%;
+  background:none;border:0;text-align:left;color:inherit;font-family:inherit;
+  font-size:1rem;font-weight:300;cursor:pointer;border-radius:7px}
+.prod>button:active{background:var(--surface-2)}
+.prod .t{flex:1;min-width:0}
+.prod .t .n{display:block;font-size:.93rem;line-height:1.25}
+.prod .t .c{display:block;font-family:'IBM Plex Mono',monospace;font-size:.66rem;
+  letter-spacing:.06em;color:var(--ink-3);margin-top:3px}
+.prod .cant{font-family:'IBM Plex Mono',monospace;font-size:1.05rem;flex:0 0 auto;
+  text-align:right;min-width:52px}
+.prod .cant.cero{color:var(--crit)}
+.prod .det{padding:2px 4px 12px;display:none}
+.prod.abierto .det{display:block}
+.prod .det .r{display:flex;justify-content:space-between;gap:10px;align-items:baseline;
+  font-family:'IBM Plex Mono',monospace;font-size:.72rem;color:var(--ink-3);
+  padding:5px 0 5px 12px;border-left:2px solid var(--rule)}
+.prod .det .r b{font-weight:500;color:var(--ink-2)}
+.prod .det .r.vence{color:var(--warn)}
+.prod .det .r.vencido{color:var(--crit)}
 </style>
 </head>
 <body>
@@ -538,91 +614,519 @@ async function cargarCat() {
 /* =================================================================
    Inicio
    ================================================================= */
+/* =================================================================
+   Portada
+   =================================================================
+   La portada vieja explicaba la app. Ésta la reporta.
+
+   Regla de la tira de datos: un número sólo aparece si alguien puede hacer
+   algo con él. "SKU en catálogo: 296" no cambia ninguna decisión y por eso
+   ya no está. "3 vencidos en el anaquel" sí. Y si no hay nada que atender,
+   la franja de pendientes no aparece: un tablero que siempre tiene algo en
+   rojo deja de leerse a la semana.
+   ================================================================= */
+
+function nFmt(v) {
+  var n = Number(v);
+  if (!isFinite(n)) return String(v == null ? '' : v);
+  return (Math.round(n * 1000) / 1000).toString();
+}
+
+function diasDeCad(f) {
+  var t = String(f || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return null;
+  var hoy = new Date(); hoy.setHours(12, 0, 0, 0);
+  return Math.round((new Date(t + 'T12:00:00').getTime() - hoy.getTime()) / 86400000);
+}
+
+/** Un renglón de existencia que no está en el anaquel está comprometido. */
+function dondeEsta(x) {
+  var t = String(x.ubic_tipo || '').toUpperCase();
+  if (t === 'CAJA' || esCaja(x.ubic_id)) return 'caja';
+  if (t === 'DOTACION') return 'dotacion';
+  return 'anaquel';
+}
+
 function pantallaInicio() {
   encabezado('Almacén', estado.sesion ? estado.sesion.nombre : '');
   var c = estado.cat || { catalogo: [], almacenes: [] };
+  var esDir = String(estado.sesion && estado.sesion.rol).toUpperCase() === 'DIRECTOR';
+
   pintar(
-    '<div class="card"><h3>Recepción de compra</h3>' +
-    '<p class="sub">Todo lo que entra al almacén pasa por aquí. Cada renglón crea un lote con su folio, su caducidad y su costo.</p>' +
-    '<button class="b-primary" id="bNueva">Nueva recepción</button></div>' +
+    '<div class="buscador">' +
+    '<input id="qBusca" placeholder="Busca un insumo…" autocomplete="off">' +
+    '<button class="b-dark" id="bBuscar">Buscar</button></div>' +
+
+    '<div id="tablero"></div>' +
+
+    '<div class="rejilla">' +
+    '<button class="baldosa fuerte ancha" id="bNueva">Nueva recepción' +
+      '<span class="q">Todo lo que entra al almacén pasa por aquí</span></button>' +
+    '<button class="baldosa" id="bExist">Existencias<span class="q">Qué hay y dónde</span></button>' +
+    '<button class="baldosa" id="bCajas">Cajas de cirugía<span class="q">Abrir, surtir, cerrar</span></button>' +
+    '<button class="baldosa" id="bArmar">¿Se puede armar?<span class="q">Plantilla contra existencia</span></button>' +
+    '<button class="baldosa" id="bCompra">Lista de compra<span class="q">Qué pedir</span></button>' +
+    '<button class="baldosa" id="bDot">Carros y cajas selladas<span class="q">Urgencias</span></button>' +
+    '<button class="baldosa" id="bCatalogo">Catálogo<span class="q">Qué es cada insumo</span></button>' +
+    '</div>' +
+
+    '<div id="tablero2"></div>' +
 
     (etiquetasPendientes().length
-      ? '<div class="card"><h3>Etiquetas sin imprimir</h3>' +
-        '<p class="sub">Hay <b>' + etiquetasPendientes().length + '</b> folio(s) capturados que ' +
-        'todavía no se imprimen. Se imprimen todos juntos en una hoja.</p>' +
-        '<button class="b-dark" id="bEtqPend">Imprimir etiquetas pendientes</button></div>'
+      ? '<button class="b-primary" id="bEtqPend">Imprimir ' + etiquetasPendientes().length +
+        ' etiqueta(s) pendiente(s)</button><div class="espacio"></div>'
+      : '') +
+    (cola().length
+      ? '<button class="b-primary" id="bReint">Reintentar envío de ' + cola().length + '</button>' +
+        '<div class="espacio"></div>'
       : '') +
 
-    '<div class="card"><h3>Cajas de cirugía</h3>' +
-    '<p class="sub">El material sale del almacén a una caja, va a quirófano y a hospitalización, y regresa. Se descuenta al alta, no antes.</p>' +
-    '<button class="b-dark" id="bCajas">Abrir o ver cajas</button></div>' +
-
-    '<div class="card"><h3>Catálogo</h3>' +
-    '<p class="sub">Qué es cada insumo, con foto. Si no reconoces algo que tienes en la mano, búscalo aquí antes de capturarlo.</p>' +
-    '<button class="b-dark" id="bCatalogo">Ver catálogo y fotos</button></div>' +
-
-    '<div class="card"><h3>Consulta</h3>' +
-    '<div class="b-fila">' +
-    '<button class="b-dark" id="bExist">Existencias</button>' +
-    '<button class="b-ghost" id="bLotes">Lotes y bajas</button></div>' +
-    '<div class="espacio"></div>' +
-    '<button class="b-ghost" id="bSinFecha">Folios sin caducidad</button></div>' +
-
-    '<div class="card"><h3>Plantillas</h3>' +
-    '<p class="sub">Qué lleva cada procedimiento. Es la medida contra la que se compara lo que de verdad consumió una caja.</p>' +
-    '<div class="b-fila">' +
-    '<button class="b-dark" id="bArmar">¿Se puede armar?</button>' +
-    '<button class="b-ghost" id="bPlant">Ver plantillas</button></div>' +
-    '<p class="mini">Una plantilla completa no quiere decir que el material esté. «¿Se puede armar?» la cruza contra la existencia de hoy.</p></div>' +
-
-    '<div class="card"><h3>Lista de compra</h3>' +
-    '<p class="sub">Qué pedir para poder armar las cajas, y qué se va a vencer antes de usarse.</p>' +
-    '<button class="b-dark" id="bCompra">Ver la lista de compra</button></div>' +
-
-    (String(estado.sesion && estado.sesion.rol).toUpperCase() === 'DIRECTOR'
-      ? '<div class="card"><h3>Folios del catálogo</h3>' +
-        '<p class="sub">El catálogo trae dos numeraciones a la vez: MED-46 es diclofenaco y MED-046 es tramadol. Homologar deja todo en tres dígitos.</p>' +
-        '<button class="b-dark" id="bFolios">Ver el plan de homologación</button>' +
-        '<div class="espacio"></div>' +
-        '<p class="sub">Y trae el mismo insumo dado de alta dos veces: el genérico que sembró el catálogo y el que de verdad está en el anaquel.</p>' +
-        '<button class="b-ghost" id="bGem">Buscar claves gemelas</button></div>'
-      : '') +
-
-    '<div class="card"><div class="lista">' +
-    '<div class="item"><div class="l"><div>SKU en catálogo</div></div><span class="pill p-neutral">' + c.catalogo.length + '</span></div>' +
-    '<div class="item"><div class="l"><div>Almacenes activos</div></div><span class="pill p-neutral">' + c.almacenes.length + '</span></div>' +
-    '<div class="item"><div class="l"><div>Pendientes por enviar</div></div><span class="pill ' + (cola().length ? 'p-warn' : 'p-neutral') + '">' + cola().length + '</span></div>' +
+    '<details class="mas"><summary>Más</summary><div>' +
+    '<div class="rejilla">' +
+    '<button class="baldosa" id="bPlant">Ver plantillas</button>' +
+    '<button class="baldosa" id="bLotes">Lotes y bajas</button>' +
+    '<button class="baldosa" id="bSinFecha">Folios sin caducidad</button>' +
+    '<button class="baldosa" id="bActivos">Activos fijos</button>' +
+    (esDir ? '<button class="baldosa" id="bFolios">Homologar folios</button>' +
+             '<button class="baldosa" id="bGem">Claves gemelas</button>' : '') +
     '</div>' +
-    (cola().length ? '<div class="espacio"></div><button class="b-ghost" id="bReint">Reintentar envío</button>' : '') +
-    '</div>' +
+    '<button class="b-ghost" id="bSalir">Cerrar sesión</button>' +
+    '</div></details>');
 
-    '<div class="card"><h3>Activos fijos</h3>' +
-    '<p class="sub">Equipo, mobiliario y cómputo etiquetados. Misma sesión: no vuelve a pedir Google.</p>' +
-    '<button class="b-dark" id="bActivos">Ir a activos fijos</button></div>' +
-
-    '<button class="b-ghost" id="bSalir">Cerrar sesión</button>');
+  function buscar() {
+    var q = ($('qBusca').value || '').trim();
+    pantallaExistencias(q);
+  }
+  $('bBuscar').onclick = buscar;
+  $('qBusca').onkeydown = function (e) { if (e.key === 'Enter') buscar(); };
 
   $('bNueva').onclick = function () {
     if (!c.almacenes.length) return alertar('No hay almacenes activos. Revisa la hoja UBICACIONES.');
     pantallaCabecera();
   };
-  if ($('bEtqPend')) $('bEtqPend').onclick = function () { location.href = 'etiquetas.html'; };
-  $('bCatalogo').onclick = function () { pantallaCatalogo(''); };
+  $('bExist').onclick = function () { pantallaExistencias(''); };
   $('bCajas').onclick = function () { pantallaCajas(); };
-  $('bExist').onclick = function () { pantallaExistencias(); };
-  $('bLotes').onclick = function () { pantallaLotes(); };
-  $('bSinFecha').onclick = function () { pantallaSinFecha(); };
-  $('bPlant').onclick = function () { pantallaPlantillas(); };
   $('bArmar').onclick = function () { pantallaSurtido(); };
   $('bCompra').onclick = function () { pantallaCompra(); };
+  $('bDot').onclick = function () { pantallaDotaciones(); };
+  $('bCatalogo').onclick = function () { pantallaCatalogo(''); };
+  $('bPlant').onclick = function () { pantallaPlantillas(); };
+  $('bLotes').onclick = function () { pantallaLotes(); };
+  $('bSinFecha').onclick = function () { pantallaSinFecha(); };
+  $('bActivos').onclick = function () { location.href = '/activos/'; };
   if ($('bFolios')) $('bFolios').onclick = function () { pantallaHomologarFolios(); };
   if ($('bGem')) $('bGem').onclick = function () { pantallaGemelas(); };
-  $('bActivos').onclick = function () { location.href = '/activos/'; };
-  $('bSalir').onclick = function () { estado.sesion = null; escribir(SES_KEY, null); pantallaLogin(); };
+  if ($('bEtqPend')) $('bEtqPend').onclick = function () { location.href = 'etiquetas.html'; };
   if ($('bReint')) $('bReint').onclick = async function () {
     this.textContent = 'Enviando…'; await vaciarCola(); pantallaInicio();
   };
+  $('bSalir').onclick = function () { estado.sesion = null; escribir(SES_KEY, null); pantallaLogin(); };
+
   pintarEstado();
+  cargarTablero();
+}
+
+/* El tablero llega después de pintar la portada: los botones tienen que
+   responder desde el primer instante aunque la red esté lenta. */
+async function cargarTablero() {
+  var caja = $('tablero');
+  if (!caja) return;
+  try {
+    var t = await enviar({ accion: 'tablero' }, true);
+    if (!t.ok || !$('tablero')) return;
+    pintarTablero(t);
+  } catch (e) {
+    $('tablero').innerHTML = '<p class="mini centro">Sin conexión: no se pudo leer el estado del almacén.</p>';
+  }
+}
+
+function pintarTablero(t) {
+  var ue = t.ultima_entrada || {};
+
+  /* Arriba sólo va lo que alguien puede atender HOY, y como mucho tres cosas.
+     Ocho fichas de números antes del primer botón es el mismo error que los
+     nueve párrafos de la portada anterior, nada más que en cifras: obliga a
+     recorrer la pantalla entera para llegar a lo que se venía a hacer.
+
+     "76 claves en cero" no entra aquí a propósito. En un almacén que apenas
+     arranca eso es lo esperado, no una urgencia; pintarlo en rojo junto a un
+     lote vencido enseña a ignorar el rojo. */
+  var urgente = [];
+  if (t.caducidad.vencidos) {
+    urgente.push({ n: t.caducidad.vencidos, e: 'vencido(s) en el anaquel', c: 'd-crit', ir: 'caducar' });
+  }
+  if (t.dotaciones.no_listas) {
+    urgente.push({ n: t.dotaciones.no_listas, e: 'de ' + t.dotaciones.total + ' dotaciones incompletas',
+                   c: 'd-crit', ir: 'dotaciones' });
+  }
+  if (t.cajas_abiertas.length) {
+    urgente.push({ n: t.cajas_abiertas.length, e: 'caja(s) abierta(s)', c: 'd-warn', ir: 'cajas' });
+  }
+  if (t.caducidad.por_vencer && urgente.length < 3) {
+    urgente.push({ n: t.caducidad.por_vencer, e: 'por vencer en ' + t.caducidad.horizonte + ' días',
+                   c: 'd-warn', ir: 'caducar' });
+  }
+  urgente = urgente.slice(0, 3);
+
+  var arriba = '';
+  if (urgente.length) {
+    arriba += '<div class="tira">' + urgente.map(function (a) {
+      return '<button class="dato ' + a.c + '" data-ir="' + a.ir + '">' +
+             '<span class="n">' + a.n + '</span><span class="e">' + esc(a.e) + '</span></button>';
+    }).join('') + '</div>';
+  } else {
+    arriba += '<div class="aviso a-ok">Nada que atender: sin vencidos, sin cajas abiertas y las dotaciones completas.</div>';
+  }
+
+  /* Que hace días que no entra nada no es una falla del sistema, pero es lo
+     primero que explica por qué media app está en rojo. */
+  if (ue.dias !== null && ue.dias !== undefined && ue.dias >= 7) {
+    arriba += '<div class="aviso a-warn">Hace <b>' + ue.dias + ' días</b> que no se captura una entrada. ' +
+              'Si ha llegado material, no está en el sistema.</div>';
+  } else if (!ue.fecha) {
+    arriba += '<div class="aviso a-info">Todavía no se ha capturado ninguna entrada.</div>';
+  }
+
+  var abajo = '<div class="tira">' +
+    '<button class="dato" data-ir="existencias"><span class="n">' + t.existencia.con_saldo +
+      '</span><span class="e">claves con existencia</span></button>' +
+    '<button class="dato" data-ir="cero"><span class="n">' + t.existencia.en_cero +
+      '</span><span class="e">claves en cero</span></button>' +
+    '<button class="dato" data-ir="armar"><span class="n">' + t.plantillas.surtibles + '/' +
+      t.plantillas.total + '</span><span class="e">plantillas armables</span></button>' +
+    '</div>';
+
+  if ($('tablero')) $('tablero').innerHTML = arriba;
+  if ($('tablero2')) $('tablero2').innerHTML = abajo;
+
+  var irA = {
+    caducar: function () { pantallaExistencias('', 'caducar'); },
+    cero: function () { pantallaExistencias('', 'cero'); },
+    existencias: function () { pantallaExistencias(''); },
+    cajas: function () { pantallaCajas(); },
+    dotaciones: function () { pantallaDotaciones(); },
+    armar: function () { pantallaSurtido(); }
+  };
+  [].forEach.call(document.querySelectorAll('[data-ir]'), function (b) {
+    b.onclick = function () { (irA[b.getAttribute('data-ir')] || function () {})(); };
+  });
+}
+
+/* =================================================================
+   Existencias
+   =================================================================
+   La pantalla anterior listaba 291 renglones de LOTE ordenados por nombre.
+   "Agua estéril" salía tres veces y había que sumar de cabeza. Eso es el
+   kardex, y el kardex es la verdad, pero no es la pregunta: la pregunta es
+   "¿cuánta agua estéril tenemos?".
+
+   Aquí se agrupa por producto y el lote queda como detalle, que es el orden
+   en que alguien lo piensa. Y lo que está en una caja abierta o en una
+   dotación sellada se cuenta aparte: existe, pero no se puede prometer.
+   ================================================================= */
+
+async function pantallaExistencias(q, filtro) {
+  encabezado('Existencias', 'Qué hay y dónde está');
+  pintar('<div class="card"><p class="sub">Cargando…</p></div>');
+  try {
+    var r = await enviar({ accion: 'existencias' }, true);
+    if (!r.ok) return pintar('<div class="aviso a-err">' + esc(r.error) + '</div>');
+    estado.exist = r.existencias;
+    estado.existQ = String(q || '');
+    estado.existF = filtro || 'todo';
+    pintarExistencias();
+  } catch (e) {
+    pintar('<div class="aviso a-err">Sin conexión.</div><button class="b-ghost" id="bV">Volver</button>');
+    $('bV').onclick = function () { pantallaInicio(); };
+  }
+}
+
+function agruparExistencias() {
+  var cat = (estado.cat && estado.cat.catalogo) || [];
+  var porSku = {};
+  cat.forEach(function (c) {
+    if (!c.sku || String(c.activo).toUpperCase() === 'NO') return;
+    porSku[String(c.sku).toUpperCase()] = {
+      sku: c.sku, nombre: c.nombre || c.sku,
+      anaquel: 0, caja: 0, dotacion: 0, lotes: [], peorDia: null
+    };
+  });
+  (estado.exist || []).forEach(function (x) {
+    var k = String(x.sku).toUpperCase();
+    if (!porSku[k]) {
+      porSku[k] = { sku: x.sku, nombre: x.nombre || x.sku,
+                    anaquel: 0, caja: 0, dotacion: 0, lotes: [], peorDia: null, fuera: true };
+    }
+    var g = porSku[k], donde = dondeEsta(x);
+    g[donde] += x.cantidad;
+    var d = diasDeCad(x.caducidad);
+    if (d !== null && donde === 'anaquel' && (g.peorDia === null || d < g.peorDia)) g.peorDia = d;
+    g.lotes.push({ lote_id: x.lote_id, ubic: x.ubic_nombre || x.ubic_id,
+                   cantidad: x.cantidad, caducidad: x.caducidad, dias: d, donde: donde });
+  });
+  return Object.keys(porSku).map(function (k) { return porSku[k]; });
+}
+
+function pintarExistencias() {
+  var todos = agruparExistencias();
+  var q = (estado.existQ || '').trim().toLowerCase();
+  var f = estado.existF || 'todo';
+
+  function sinAc(s) {
+    return String(s || '').normalize ? String(s).normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase()
+                                     : String(s || '').toLowerCase();
+  }
+  var qn = sinAc(q);
+
+  var cuenta = {
+    todo: todos.filter(function (g) { return g.anaquel > 0 || g.caja > 0 || g.dotacion > 0; }).length,
+    cero: todos.filter(function (g) { return !g.fuera && g.anaquel <= 0; }).length,
+    caducar: todos.filter(function (g) { return g.peorDia !== null && g.peorDia <= 90; }).length,
+    caja: todos.filter(function (g) { return g.caja > 0; }).length,
+    dotacion: todos.filter(function (g) { return g.dotacion > 0; }).length
+  };
+
+  var lista = todos.filter(function (g) {
+    if (qn && sinAc(g.nombre).indexOf(qn) < 0 && sinAc(g.sku).indexOf(qn) < 0) return false;
+    if (f === 'todo') return g.anaquel > 0 || g.caja > 0 || g.dotacion > 0;
+    if (f === 'cero') return !g.fuera && g.anaquel <= 0;
+    if (f === 'caducar') return g.peorDia !== null && g.peorDia <= 90;
+    if (f === 'caja') return g.caja > 0;
+    if (f === 'dotacion') return g.dotacion > 0;
+    return true;
+  });
+
+  /* Lo urgente arriba: primero lo vencido, luego lo que está por vencerse,
+     y dentro de cada grupo por nombre. Ordenar sólo por nombre esconde lo
+     que hay que atender en la letra T. */
+  lista.sort(function (a, b) {
+    var pa = a.peorDia !== null && a.peorDia < 0 ? 0 : (a.peorDia !== null && a.peorDia <= 90 ? 1 : 2);
+    var pb = b.peorDia !== null && b.peorDia < 0 ? 0 : (b.peorDia !== null && b.peorDia <= 90 ? 1 : 2);
+    if (pa !== pb) return pa - pb;
+    return String(a.nombre).localeCompare(String(b.nombre));
+  });
+
+  function chip(id, txt) {
+    return '<button class="chip' + (f === id ? ' on' : '') + '" data-f="' + id + '">' +
+           esc(txt) + '<span class="c">' + cuenta[id] + '</span></button>';
+  }
+
+  function prod(g, i) {
+    var cero = g.anaquel <= 0;
+    var marcas = [];
+    if (g.peorDia !== null && g.peorDia < 0) marcas.push('<span class="pill p-crit">vencido</span>');
+    else if (g.peorDia !== null && g.peorDia <= 90) marcas.push('<span class="pill p-warn">vence en ' + g.peorDia + 'd</span>');
+    if (g.caja > 0) marcas.push('<span class="pill p-info">' + nFmt(g.caja) + ' en caja</span>');
+    if (g.dotacion > 0) marcas.push('<span class="pill p-neutral">' + nFmt(g.dotacion) + ' comprometido</span>');
+
+    var det = g.lotes.length
+      ? g.lotes.slice().sort(function (a, b) { return (a.dias === null ? 1e9 : a.dias) - (b.dias === null ? 1e9 : b.dias); })
+          .map(function (l) {
+            var cls = l.dias !== null && l.dias < 0 ? ' vencido' : (l.dias !== null && l.dias <= 90 ? ' vence' : '');
+            return '<div class="r' + cls + '"><span>' + esc(l.lote_id) + ' · ' + esc(l.ubic) +
+                   (l.caducidad ? ' · cad ' + esc(l.caducidad) : ' · sin caducidad') +
+                   (l.donde !== 'anaquel' ? ' · ' + (l.donde === 'caja' ? 'EN CAJA' : 'COMPROMETIDO') : '') +
+                   '</span><b>' + nFmt(l.cantidad) + '</b></div>';
+          }).join('')
+      : '<div class="r"><span>Sin ningún lote capturado</span><b>0</b></div>';
+
+    return '<div class="prod" id="pg' + i + '">' +
+      '<button data-g="' + i + '"><span class="t"><span class="n">' + esc(g.nombre) + '</span>' +
+      '<span class="c">' + esc(g.sku) + (marcas.length ? ' ' : '') + '</span></span>' +
+      '<span class="cant' + (cero ? ' cero' : '') + '">' + nFmt(g.anaquel) + '</span></button>' +
+      (marcas.length ? '<div style="padding:0 4px 8px">' + marcas.join(' ') + '</div>' : '') +
+      '<div class="det">' + det + '</div></div>';
+  }
+
+  pintar(
+    '<div class="buscador"><input id="qE" placeholder="Busca por nombre o clave…" ' +
+    'autocomplete="off" value="' + esc(estado.existQ || '') + '"></div>' +
+    '<div class="chips">' +
+    chip('todo', 'Con existencia') + chip('cero', 'En cero') +
+    chip('caducar', 'Por caducar') + chip('caja', 'En cajas') +
+    chip('dotacion', 'Comprometido') + '</div>' +
+    '<div class="card">' +
+    '<p class="mini">La cifra es lo que hay <b>en el anaquel</b>. Toca un renglón para ver sus lotes.</p>' +
+    (lista.length
+      ? '<div>' + lista.map(prod).join('') + '</div>'
+      : '<p class="sub centro">Nada que mostrar con ese filtro.</p>') +
+    '</div>' +
+    '<button class="b-ghost" id="bV">Volver</button>');
+
+  var inp = $('qE');
+  inp.oninput = function () {
+    estado.existQ = inp.value;
+    var pos = inp.selectionStart;
+    pintarExistencias();
+    var n = $('qE'); n.focus(); try { n.setSelectionRange(pos, pos); } catch (e) {}
+  };
+  [].forEach.call(document.querySelectorAll('[data-f]'), function (b) {
+    b.onclick = function () { estado.existF = b.getAttribute('data-f'); pintarExistencias(); };
+  });
+  [].forEach.call(document.querySelectorAll('[data-g]'), function (b) {
+    b.onclick = function () { $('pg' + b.getAttribute('data-g')).classList.toggle('abierto'); };
+  });
+  $('bV').onclick = function () { pantallaInicio(); };
+}
+
+/* =================================================================
+   Dotaciones selladas
+   =================================================================
+   Carros rojos y cajas de urgencia. No se miden por consumo como una caja
+   de cirugía: se miden por presencia. La pregunta no es cuánto se gastó,
+   es si está completo y si el sello sigue vigente.
+   ================================================================= */
+
+async function pantallaDotaciones() {
+  encabezado('Carros y cajas selladas', 'Para urgencias');
+  pintar('<div class="card"><p class="sub">Cargando…</p></div>');
+  try {
+    var r = await enviar({ accion: 'dotaciones' }, true);
+    if (!r.ok) return pintar('<div class="aviso a-err">' + esc(r.error) + '</div>' +
+      '<button class="b-ghost" onclick="pantallaInicio()">Volver</button>');
+
+    function tarjeta(d) {
+      var estadoTxt, cls;
+      if (d.sin_lista) { estadoTxt = 'Sin lista'; cls = 'p-crit'; }
+      else if (d.lista_para_usarse) { estadoTxt = 'Completa'; cls = 'p-ok'; }
+      else {
+        var partes = [];
+        if (d.faltan) partes.push(d.faltan + ' insumo(s)');
+        if (d.falta_equipo) partes.push(d.falta_equipo + ' equipo(s)');
+        if (d.vencidos) partes.push(d.vencidos + ' vencido(s)');
+        if (d.sin_clave) partes.push(d.sin_clave + ' sin clave');
+        estadoTxt = 'Falta ' + partes.join(', ');
+        cls = 'p-crit';
+      }
+      var sello = d.sello
+        ? (d.sello.vigente ? 'Sellada hace ' + d.sello.dias + ' d'
+                           : (d.sello.estado === 'ABIERTA' ? 'Abierta' : 'Sello vencido (' + d.sello.dias + ' d)'))
+        : 'Nunca se ha sellado';
+      return '<button class="baldosa ancha" data-u="' + esc(d.ubicacion) + '">' +
+        esc(d.nombre) +
+        '<span class="q"><span class="pill ' + cls + '">' + esc(estadoTxt) + '</span> ' +
+        esc(sello) + '</span></button>';
+    }
+
+    pintar(
+      (r.no_listas
+        ? '<div class="aviso a-err"><b>' + r.no_listas + ' de ' + r.dotaciones.length +
+          '</b> no están listas para una urgencia.</div>'
+        : '<div class="aviso a-ok">Las ' + r.dotaciones.length + ' están completas.</div>') +
+      '<div class="rejilla">' + r.dotaciones.map(tarjeta).join('') + '</div>' +
+      '<p class="mini">Una dotación se mide por <b>presencia</b>, no por consumo: lo que vive aquí ' +
+      'tiene que estar aunque nunca se use, y no cuenta como disponible para armar cirugías.</p>' +
+      '<button class="b-ghost" id="bV">Volver</button>');
+
+    [].forEach.call(document.querySelectorAll('[data-u]'), function (b) {
+      b.onclick = function () { pantallaDotacion(b.getAttribute('data-u')); };
+    });
+    $('bV').onclick = function () { pantallaInicio(); };
+  } catch (e) {
+    pintar('<div class="aviso a-err">Sin conexión.</div>' +
+      '<button class="b-ghost" id="bV">Volver</button>');
+    $('bV').onclick = function () { pantallaInicio(); };
+  }
+}
+
+async function pantallaDotacion(ubic) {
+  encabezado('Revisión', ubic);
+  pintar('<div class="card"><p class="sub">Cargando…</p></div>');
+  try {
+    var r = await enviar({ accion: 'dotacion', ubicacion: ubic }, true);
+    if (!r.ok) return pintar('<div class="aviso a-err">' + esc(r.error) + '</div>' +
+      '<button class="b-ghost" id="bV">Volver</button>') || ($('bV').onclick = function () { pantallaDotaciones(); });
+    encabezado('Revisión', r.nombre);
+
+    function reng(x) {
+      var cls = x.estado === 'COMPLETO' ? 'p-ok' : (x.estado === 'INCOMPLETO' ? 'p-warn' : 'p-crit');
+      var dice = x.estado === 'SIN_CLAVE' ? 'sin clave'
+               : (x.estado === 'COMPLETO' ? 'completo' : 'hay ' + nFmt(x.hay) + ' de ' + nFmt(x.pide));
+      return '<div class="item"><div class="l"><span>' + esc(x.sku || '—') + '</span>' +
+        '<div>' + esc(x.item) + '</div></div>' +
+        '<span class="pill ' + cls + '">' + esc(dice) + '</span></div>';
+    }
+    function equipo(x) {
+      var cls = x.estado === 'COMPLETO' ? 'p-ok' : (x.estado === 'INCOMPLETO' ? 'p-warn' : 'p-crit');
+      var quiza = (x.quiza || []).length
+        ? '<div class="mini" style="margin-top:3px">¿Será «' + esc(x.quiza[0].nombre) + '» (' +
+          esc(x.quiza[0].activo_id) + ')? Se parece ' + x.quiza[0].parecido + '%, pero no se da por bueno solo.</div>'
+        : '';
+      var ids = (x.activos || []).map(function (a) { return a.activo_id; }).join(', ');
+      return '<div class="item"><div class="l"><span>' + esc(ids || 'sin folio') + '</span>' +
+        '<div>' + esc(x.item) + '</div>' + quiza + '</div>' +
+        '<span class="pill ' + cls + '">' + (x.estado === 'COMPLETO' ? 'presente' : nFmt(x.hay) + ' de ' + nFmt(x.pide)) +
+        '</span></div>';
+    }
+
+    var s = r.sello;
+    pintar(
+      (r.lista_para_usarse
+        ? '<div class="aviso a-ok">Completa y lista para usarse.</div>'
+        : '<div class="aviso a-err">No está lista: faltan ' + r.faltan + ' insumo(s)' +
+          (r.falta_equipo ? ' y ' + r.falta_equipo + ' equipo(s)' : '') +
+          (r.vencidos.length ? ', y hay ' + r.vencidos.length + ' lote(s) vencido(s)' : '') + '.</div>') +
+      '<div class="card"><h3>Sello</h3><p class="sub">' +
+        (s ? esc(s.estado) + (s.folio ? ' · folio ' + esc(s.folio) : '') + ' · hace ' + s.dias + ' días' +
+             (s.vigente ? '' : ' (ya no es vigente)')
+           : 'Nunca se ha sellado.') + '</p>' +
+      '<div class="b-fila"><button class="b-dark" id="bSellar">Sellar</button>' +
+      '<button class="b-ghost" id="bAbrir">Registrar apertura</button></div></div>' +
+
+      (r.equipo.length
+        ? '<div class="card"><h3>Equipo (' + r.equipo.length + ')</h3>' +
+          '<p class="mini">Esto no se mide contra la existencia del almacén sino contra el registro de activos: ' +
+          'lo que importa es que el aparato esté asignado a esta ubicación.</p>' +
+          '<div class="lista">' + r.equipo.map(equipo).join('') + '</div></div>'
+        : '') +
+
+      '<div class="card"><h3>Insumos (' + r.renglones.length + ')</h3>' +
+      '<div class="lista">' + (r.renglones.map(reng).join('') ||
+        '<p class="sub centro">Todavía no se captura qué debe vivir aquí.</p>') + '</div></div>' +
+
+      (r.sobra.length
+        ? '<div class="card"><h3>Sobra (' + r.sobra.length + ')</h3>' +
+          '<p class="mini">Material que está adentro y que nadie decidió poner. En una urgencia, estorba.</p>' +
+          '<div class="lista">' + r.sobra.map(function (x) {
+            return '<div class="item"><div class="l"><span>' + esc(x.sku) + '</span><div>' +
+              esc(x.nombre) + '</div></div><span class="pill p-warn">' + nFmt(x.hay) + '</span></div>';
+          }).join('') + '</div></div>'
+        : '') +
+
+      (r.por_vencer.length || r.vencidos.length
+        ? '<div class="card"><h3>Caducidades</h3>' +
+          '<div class="lista">' + r.vencidos.concat(r.por_vencer).map(function (x) {
+            return '<div class="item"><div class="l"><span>' + esc(x.lote_id) + '</span><div>' +
+              esc(x.nombre) + '</div></div><span class="pill ' + (x.dias < 0 ? 'p-crit">vencido' : 'p-warn">' + x.dias + ' d') +
+              '</span></div>';
+          }).join('') + '</div>' +
+          '<p class="mini">El horizonte aquí es de ' + r.horizonte_caducidad + ' días, más largo que en el ' +
+          'anaquel: adentro de un sello nadie lo va a consumir antes.</p></div>'
+        : '') +
+
+      '<button class="b-ghost" id="bV">Volver</button>');
+
+    $('bSellar').onclick = async function () {
+      var folio = prompt('Folio del sello (opcional):', '');
+      if (folio === null) return;
+      this.disabled = true;
+      var res = await enviar({ accion: 'sello', ubicacion: ubic, que: 'SELLAR', folio: folio || '' }, true);
+      if (!res.ok) { alertar(res.error); this.disabled = false; return; }
+      pantallaDotacion(ubic);
+    };
+    $('bAbrir').onclick = async function () {
+      var motivo = prompt('¿Por qué se abre? (obligatorio)', '');
+      if (!motivo) return;
+      this.disabled = true;
+      var res = await enviar({ accion: 'sello', ubicacion: ubic, que: 'ABRIR', motivo: motivo }, true);
+      if (!res.ok) { alertar(res.error); this.disabled = false; return; }
+      pantallaDotacion(ubic);
+    };
+    $('bV').onclick = function () { pantallaDotaciones(); };
+  } catch (e) {
+    pintar('<div class="aviso a-err">Sin conexión.</div><button class="b-ghost" id="bV">Volver</button>');
+    $('bV').onclick = function () { pantallaDotaciones(); };
+  }
 }
 
 /* =================================================================
@@ -1411,45 +1915,6 @@ function pantallaCajaCerrar(cajaId) {
     }
   };
   $('bV').onclick = function () { pantallaCajaDetalle(cajaId); };
-}
-
-async function pantallaExistencias() {
-  var c = estado.cat || { almacenes: [] };
-  encabezado('Existencias', 'Derivadas del kardex');
-  pintar('<div class="card"><p class="sub">Cargando…</p></div>');
-  try {
-    var r = await enviar({ accion: 'existencias' }, true);
-    if (!r.ok) return pintar('<div class="aviso a-err">' + esc(r.error) + '</div>');
-    var nombresAlm = {};
-    c.almacenes.forEach(function (a) { nombresAlm[a.id] = a.nombre; });
-
-    function fila(x) {
-      return '<div class="item"><div class="l"><span>' + esc(x.lote_id) + ' · ' +
-        esc(nombresAlm[x.ubic_id] || x.ubic_id) + '</span><div>' + esc(x.nombre) + '</div></div>' +
-        '<span class="pill p-ok mono">' + esc(x.cantidad) + '</span></div>';
-    }
-
-    /* El material en cajas abiertas existe, pero no está en el anaquel.
-       Mezclarlo con lo demás es lo que hace comprar de más. */
-    var anaquel = r.existencias.filter(function (x) { return !esCaja(x.ubic_id); });
-    var enCajas = r.existencias.filter(function (x) { return esCaja(x.ubic_id); });
-
-    pintar(
-      '<div class="card"><h3>' + anaquel.length + ' renglones en el anaquel</h3>' +
-      '<div class="lista">' + (anaquel.map(fila).join('') ||
-        '<p class="sub centro">El almacén está en cero. Todo lo que entre lo hará por una recepción.</p>') +
-      '</div></div>' +
-      (enCajas.length
-        ? '<div class="card"><h3>' + enCajas.length + ' renglones en cajas abiertas</h3>' +
-          '<p class="mini">Esto no está disponible para surtir: anda en quirófano o en hospitalización.</p>' +
-          '<div class="lista">' + enCajas.map(fila).join('') + '</div></div>'
-        : '') +
-      '<button class="b-ghost" id="bV">Volver</button>');
-    $('bV').onclick = function () { pantallaInicio(); };
-  } catch (e) {
-    pintar('<div class="aviso a-err">Sin conexión.</div><button class="b-ghost" id="bV">Volver</button>');
-    $('bV').onclick = function () { pantallaInicio(); };
-  }
 }
 
 /* La lista de los últimos 25 alcanza el día de la recepción. No alcanza
