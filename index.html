@@ -668,6 +668,9 @@ function pantallaInicio() {
     '<button class="baldosa" id="bCompra">Lista de compra<span class="q">Qué pedir</span></button>' +
     '<button class="baldosa" id="bDot">Carros y cajas selladas<span class="q">Urgencias</span></button>' +
     '<button class="baldosa" id="bCatalogo">Catálogo<span class="q">Qué es cada insumo</span></button>' +
+    (['DIRECTOR','GERENCIA'].indexOf(String(estado.sesion && estado.sesion.rol).toUpperCase()) >= 0
+      ? '<button class="baldosa ancha" id="bRevis">Por revisar' +
+        '<span class="q">Consumo real contra lo que pedía la plantilla</span></button>' : '') +
     '</div>' +
 
     '<div id="tablero2"></div>' +
@@ -687,7 +690,9 @@ function pantallaInicio() {
     '<button class="baldosa" id="bLotes">Lotes y bajas</button>' +
     '<button class="baldosa" id="bSinFecha">Folios sin caducidad</button>' +
     '<button class="baldosa" id="bActivos">Activos fijos</button>' +
-    (esDir ? '<button class="baldosa" id="bFolios">Homologar folios</button>' +
+    (esDir ? '<button class="baldosa" id="bUsuarios">Usuarios y ubicaciones</button>' +
+             '<button class="baldosa" id="bAnular">Anular recepción</button>' +
+             '<button class="baldosa" id="bFolios">Homologar folios</button>' +
              '<button class="baldosa" id="bGem">Claves gemelas</button>' : '') +
     '</div>' +
     '<button class="b-ghost" id="bSalir">Cerrar sesión</button>' +
@@ -714,6 +719,9 @@ function pantallaInicio() {
   $('bLotes').onclick = function () { pantallaLotes(); };
   $('bSinFecha').onclick = function () { pantallaSinFecha(); };
   $('bActivos').onclick = function () { location.href = '/activos/'; };
+  if ($('bRevis')) $('bRevis').onclick = function () { pantallaRevisiones(); };
+  if ($('bUsuarios')) $('bUsuarios').onclick = function () { pantallaUsuarios(); };
+  if ($('bAnular')) $('bAnular').onclick = function () { pantallaAnularRecepcion(); };
   if ($('bFolios')) $('bFolios').onclick = function () { pantallaHomologarFolios(); };
   if ($('bGem')) $('bGem').onclick = function () { pantallaGemelas(); };
   if ($('bEtqPend')) $('bEtqPend').onclick = function () { location.href = 'etiquetas.html'; };
@@ -999,6 +1007,585 @@ function pintarExistencias() {
 }
 
 /* =================================================================
+   Armar una caja contra su plantilla
+   =================================================================
+   Surtir a mano son 63 búsquedas para una rinoplastia: buscar, elegir lote,
+   teclear cantidad, repetir. Nadie hace eso dos veces; a la tercera cirugía
+   la caja se arma en papel y el sistema se queda vacío.
+
+   Esto lo hace de un toque: lee la plantilla, toma los lotes por caducidad
+   más próxima y surte. Primero en seco, siempre: ver qué va a salir y qué
+   va a faltar ANTES de mover inventario de verdad, porque probar el surtido
+   contra el inventario real mueve inventario real.
+   ================================================================= */
+
+function pantallaCajaArmar() {
+  var c = estado.cat || { almacenes: [] };
+  encabezado('Armar caja', 'Contra la plantilla del procedimiento');
+  var plants = (estado.plantillasNombres || []);
+
+  pintar(
+    '<div class="card">' +
+    '<div class="campo"><label>Paciente</label><input id="aPac" placeholder="Nombre completo"></div>' +
+    '<div class="campo"><label>Expediente (opcional)</label><input id="aExp"></div>' +
+    '<div class="campo"><label>Procedimiento</label><select id="aPlant">' +
+      '<option value="">— elige —</option>' +
+      plants.map(function (n) { return '<option>' + esc(n) + '</option>'; }).join('') +
+    '</select></div>' +
+    '<div class="campo"><label>Almacén que surte</label><select id="aAlm">' +
+      c.almacenes.map(function (a) {
+        return '<option value="' + esc(a.id) + '">' + esc(a.nombre) + '</option>'; }).join('') +
+    '</select></div>' +
+    '<button class="b-dark" id="bVer">Ver qué saldría</button>' +
+    '<p class="mini">Primero en seco: nada se mueve hasta que lo confirmes.</p>' +
+    '</div>' +
+    '<div id="aPrev"></div>' +
+    '<button class="b-ghost" id="bV">Volver</button>');
+
+  if (!plants.length) {
+    enviar({ accion: 'plantillas' }, true).then(function (r) {
+      if (!r.ok) return;
+      estado.plantillasNombres = (r.plantillas || [])
+        .filter(function (p) { return !p.es_base; })
+        .map(function (p) { return p.plantilla; });
+      if ($('aPlant')) pantallaCajaArmar();
+    }).catch(function () {});
+  }
+
+  $('bV').onclick = function () { pantallaCajas(); };
+  $('bVer').onclick = async function () {
+    var d = leerCajaArmar();
+    if (!d) return;
+    this.disabled = true; this.textContent = 'Calculando…';
+    try {
+      var r = await enviar({ accion: 'caja_armar', simular: true, caja: d }, true);
+      pintarPrevioArmado(r, d);
+    } catch (e) { alertar('Sin conexión.'); }
+    var b = $('bVer'); if (b) { b.disabled = false; b.textContent = 'Ver qué saldría'; }
+  };
+}
+
+function leerCajaArmar() {
+  var pac = ($('aPac').value || '').trim();
+  var plant = $('aPlant').value;
+  var alm = $('aAlm').value;
+  if (!pac) { alertar('Falta el paciente.'); return null; }
+  if (!plant) { alertar('Falta el procedimiento.'); return null; }
+  if (!alm) { alertar('Falta el almacén.'); return null; }
+  return { paciente: pac, paciente_id: ($('aExp').value || '').trim(),
+           procedimiento: plant, almacen: alm };
+}
+
+function pintarPrevioArmado(r, d) {
+  if (!r.ok) { $('aPrev').innerHTML = '<div class="aviso a-err">' + esc(r.error) + '</div>'; return; }
+
+  function fila(x, falta) {
+    return '<div class="item"><div class="l"><span>' + esc(x.sku || '—') + '</span>' +
+      '<div>' + esc(x.item) + '</div></div>' +
+      '<span class="pill ' + (falta ? 'p-crit' : 'p-ok') + '">' +
+      (falta ? nFmt(x.surtido) + ' de ' + nFmt(x.pide) : nFmt(x.surtido)) + '</span></div>';
+  }
+
+  $('aPrev').innerHTML =
+    (r.faltantes.length
+      ? '<div class="aviso a-warn"><b>' + r.faltantes.length + ' renglón(es) no se pueden surtir completos.</b> ' +
+        'La caja se puede armar de todos modos: lo que falte se consigue aparte y se mete con «Sacar material». ' +
+        'Lo que la plantilla pedía queda congelado, así que la diferencia no se pierde.</div>'
+      : '<div class="aviso a-ok">Se puede surtir completa: ' + r.surtido.length + ' renglones.</div>') +
+
+    (r.faltantes.length
+      ? '<div class="card"><h3>Falta (' + r.faltantes.length + ')</h3><div class="lista">' +
+        r.faltantes.map(function (x) { return fila(x, true); }).join('') + '</div></div>'
+      : '') +
+
+    '<div class="card"><h3>Saldría del almacén (' + r.surtido.length + ')</h3>' +
+    '<p class="mini">Por caducidad más próxima primero.</p>' +
+    '<div class="lista">' + r.surtido.map(function (x) { return fila(x, false); }).join('') +
+    '</div></div>' +
+
+    (r.revisar && r.revisar.length
+      ? '<div class="card"><h3>No es material de almacén (' + r.revisar.length + ')</h3>' +
+        '<p class="mini">Renglones de la plantilla que son nota, no insumo. No salen de aquí.</p>' +
+        '<div class="lista">' + r.revisar.map(function (x) {
+          return '<div class="item"><div class="l"><div>' + esc(x.item) + '</div></div></div>';
+        }).join('') + '</div></div>'
+      : '') +
+
+    '<button class="b-primary" id="bArmar">Armar la caja y sacar el material</button>';
+
+  $('bArmar').onclick = async function () {
+    this.disabled = true; this.textContent = 'Armando…';
+    try {
+      var res = await enviar({ accion: 'caja_armar', caja: d }, true);
+      if (!res.ok) { alertar(res.error); this.disabled = false;
+                     this.textContent = 'Armar la caja y sacar el material'; return; }
+      alertar('Caja ' + res.caja_id + ' armada: ' + res.renglones_surtidos + ' renglones.');
+      pantallaCajaDetalle(res.caja_id);
+    } catch (e) {
+      alertar('Sin conexión: no se armó nada.');
+      this.disabled = false; this.textContent = 'Armar la caja y sacar el material';
+    }
+  };
+}
+
+/* =================================================================
+   Bandeja de variación
+   =================================================================
+   Cerrar una caja calcula el consumo. Revisarla es que una persona mire la
+   diferencia contra lo que la plantilla pedía y firme que la conoce. Sin
+   esta pantalla el sistema sabía que se fueron ocho gasas de más y nadie
+   se enteraba nunca.
+   ================================================================= */
+
+async function pantallaRevisiones(todas) {
+  encabezado('Por revisar', 'Consumo contra plantilla');
+  pintar('<div class="card"><p class="sub">Cargando…</p></div>');
+  try {
+    var r = await enviar({ accion: 'cajas_por_revisar', todas: todas ? 'SI' : '' }, true);
+    if (!r.ok) return pintar('<div class="aviso a-err">' + esc(r.error) + '</div>' +
+      '<button class="b-ghost" onclick="pantallaInicio()">Volver</button>');
+
+    function caja(c) {
+      var marcas = [];
+      if (c.controlados) marcas.push('<span class="pill p-crit">' + c.controlados + ' controlado(s)</span>');
+      if (c.hay_que_revisar) marcas.push('<span class="pill p-warn">' + c.hay_que_revisar + ' fuera de rango</span>');
+      if (c.revisada) marcas.push('<span class="pill p-ok">revisada</span>');
+      if (!marcas.length) marcas.push('<span class="pill p-ok">sin variación</span>');
+      return '<button class="baldosa ancha" data-c="' + esc(c.caja_id) + '">' +
+        esc(c.paciente || c.caja_id) + ' · ' + esc(c.procedimiento) +
+        '<span class="q">' + marcas.join(' ') + ' · cerrada hace ' + c.dias + ' d</span></button>';
+    }
+
+    pintar(
+      (r.pendientes
+        ? '<div class="aviso a-warn"><b>' + r.pendientes + '</b> caja(s) cerradas sin que nadie haya revisado su consumo.</div>'
+        : '<div class="aviso a-ok">Nada pendiente de revisar.</div>') +
+      (r.cajas.length
+        ? '<div class="rejilla">' + r.cajas.map(caja).join('') + '</div>'
+        : '<div class="card"><p class="sub centro">No hay cajas cerradas.</p></div>') +
+      '<p class="mini">Se marca un renglón cuando la diferencia pasa del ' +
+        Math.round(r.umbral * 100) + '%, y <b>siempre</b> si es un controlado que no cuadra: ' +
+        'ahí no hay variación tolerable que valga.</p>' +
+      '<button class="b-ghost" id="bTodas">' + (todas ? 'Ver sólo pendientes' : 'Ver también las ya revisadas') + '</button>' +
+      '<button class="b-ghost" id="bV">Volver</button>');
+
+    [].forEach.call(document.querySelectorAll('[data-c]'), function (b) {
+      b.onclick = function () { pantallaVariacion(b.getAttribute('data-c')); };
+    });
+    $('bTodas').onclick = function () { pantallaRevisiones(!todas); };
+    $('bV').onclick = function () { pantallaInicio(); };
+  } catch (e) {
+    pintar('<div class="aviso a-err">Sin conexión.</div><button class="b-ghost" id="bV">Volver</button>');
+    $('bV').onclick = function () { pantallaInicio(); };
+  }
+}
+
+async function pantallaVariacion(cajaId) {
+  encabezado('Variación', cajaId);
+  pintar('<div class="card"><p class="sub">Cargando…</p></div>');
+  try {
+    var r = await enviar({ accion: 'caja_comparar', caja_id: cajaId }, true);
+    if (!r.ok) {
+      pintar('<div class="aviso a-err">' + esc(r.error) + '</div>' +
+             '<button class="b-ghost" id="bV">Volver</button>');
+      return void ($('bV').onclick = function () { pantallaRevisiones(); });
+    }
+    encabezado('Variación', (r.paciente || cajaId) + ' · ' + (r.plantilla || ''));
+
+    var dice = { MAS: 'se usó de más', MENOS: 'se usó de menos',
+                 EXTRA: 'no estaba en la plantilla', IGUAL: 'cuadra' };
+    var color = { MAS: 'p-crit', MENOS: 'p-warn', EXTRA: 'p-info', IGUAL: 'p-ok' };
+
+    function fila(f) {
+      return '<div class="item"><div class="l"><span>' + esc(f.sku) +
+        (f.controlado ? ' · CONTROLADO' : '') + '</span><div>' + esc(f.item || f.nombre) + '</div>' +
+        '<div class="mini">pedía ' + nFmt(f.esperado) + ' · consumió ' + nFmt(f.consumido) + '</div></div>' +
+        '<span class="pill ' + color[f.estado] + '">' +
+        (f.diferencia > 0 ? '+' : '') + nFmt(f.diferencia) + '</span></div>';
+    }
+
+    var fuera = r.filas.filter(function (f) { return f.estado !== 'IGUAL'; });
+    var iguales = r.filas.length - fuera.length;
+
+    pintar(
+      (r.hay_que_revisar
+        ? '<div class="aviso a-err"><b>' + r.hay_que_revisar + ' renglón(es)</b> piden explicación.</div>'
+        : '<div class="aviso a-ok">Nada fuera de rango.</div>') +
+
+      (r.marcados.length
+        ? '<div class="card"><h3>Piden explicación (' + r.marcados.length + ')</h3>' +
+          '<div class="lista">' + r.marcados.map(fila).join('') + '</div></div>'
+        : '') +
+
+      (fuera.length > r.marcados.length
+        ? '<div class="card"><h3>Otras diferencias (' + (fuera.length - r.marcados.length) + ')</h3>' +
+          '<p class="mini">Dentro del margen: no bloquean, pero ahí están.</p>' +
+          '<div class="lista">' + fuera.filter(function (f) {
+            return r.marcados.indexOf(f) < 0; }).map(fila).join('') + '</div></div>'
+        : '') +
+
+      '<p class="mini">' + iguales + ' renglón(es) cuadran exactamente. ' +
+      'La columna de la derecha es consumido menos lo que la plantilla pedía ' +
+      '<b>el día que se armó la caja</b>, no lo que la plantilla diga hoy.</p>' +
+
+      '<div class="card"><h3>Revisión</h3>' +
+      '<div class="campo"><label>Qué explica la diferencia</label>' +
+      '<textarea id="vNota" rows="3" placeholder="Ej.: se abrieron dos paquetes de gasas por sangrado"></textarea></div>' +
+      '<button class="b-primary" id="bFirmar">Dar por revisada</button>' +
+      '<p class="mini">Queda tu nombre y la fecha. No corrige inventario: es la firma de que alguien lo vio.</p>' +
+      '</div>' +
+      '<button class="b-ghost" id="bV">Volver</button>');
+
+    $('bFirmar').onclick = async function () {
+      var nota = ($('vNota').value || '').trim();
+      if (!nota) return alertar('La revisión pide una nota.');
+      this.disabled = true;
+      var res = await enviar({ accion: 'caja_revisar', caja_id: cajaId, nota: nota }, true);
+      if (!res.ok) {
+        if (/ya la revisó/.test(res.error || '')) {
+          if (confirm(res.error)) {
+            var re = await enviar({ accion: 'caja_revisar', caja_id: cajaId, nota: nota, rehacer: 'SI' }, true);
+            if (re.ok) return pantallaRevisiones();
+            alertar(re.error);
+          }
+        } else alertar(res.error);
+        this.disabled = false; return;
+      }
+      pantallaRevisiones();
+    };
+    $('bV').onclick = function () { pantallaRevisiones(); };
+  } catch (e) {
+    pintar('<div class="aviso a-err">Sin conexión.</div><button class="b-ghost" id="bV">Volver</button>');
+    $('bV').onclick = function () { pantallaRevisiones(); };
+  }
+}
+
+/* =================================================================
+   Anular una recepción
+   =================================================================
+   Si una compra se capturó mal, hoy no había manera de corregirla desde la
+   app. El backend sabía hacerlo desde hace semanas y nadie podía llamarlo.
+
+   Anular quita los lotes y sus movimientos de entrada, y sólo si NADA de
+   esa recepción se ha movido todavía: una vez que algo salió al quirófano,
+   la historia ya no se puede borrar y hay que corregir con un movimiento,
+   no con una goma.
+   ================================================================= */
+
+async function pantallaAnularRecepcion() {
+  encabezado('Anular recepción', 'Corregir una compra mal capturada');
+  pintar(
+    '<div class="aviso a-warn">Esto borra los lotes de esa recepción y sus entradas. ' +
+    'Sólo funciona si nada de ella se ha movido: si ya salió material, la historia no se borra ' +
+    'y hay que corregir con un movimiento.</div>' +
+    '<div class="card">' +
+    '<div class="campo"><label>Folio de la recepción</label>' +
+    '<input id="rFolio" placeholder="REC-00023" autocomplete="off"></div>' +
+    '<div class="campo"><label>Motivo</label>' +
+    '<textarea id="rMot" rows="2" placeholder="Por qué se anula. Queda en la bitácora."></textarea></div>' +
+    '<button class="b-dark" id="bAnular">Anular</button>' +
+    '</div>' +
+    '<button class="b-ghost" id="bV">Volver</button>');
+
+  $('bV').onclick = function () { pantallaInicio(); };
+  $('bAnular').onclick = async function () {
+    var folio = ($('rFolio').value || '').trim().toUpperCase();
+    var motivo = ($('rMot').value || '').trim();
+    if (!folio) return alertar('Falta el folio.');
+    if (!motivo) return alertar('Falta el motivo: queda en la bitácora.');
+    if (!confirm('¿Anular ' + folio + '? Esto no se puede deshacer desde la app.')) return;
+    this.disabled = true; this.textContent = 'Anulando…';
+    try {
+      var r = await enviar({ accion: 'recepcion_anular', recepcion_id: folio, motivo: motivo }, true);
+      if (!r.ok) {
+        pintar('<div class="aviso a-err">' + esc(r.error) + '</div>' +
+          (r.movidos && r.movidos.length
+            ? '<div class="card"><h3>Ya se movió</h3><div class="lista">' +
+              r.movidos.map(function (m) {
+                return '<div class="item"><div class="l"><span>' + esc(m.lote_id) +
+                  '</span><div>' + esc(m.nombre || m.sku) + '</div></div></div>'; }).join('') +
+              '</div></div>'
+            : '') +
+          '<button class="b-ghost" id="bV">Volver</button>');
+        return void ($('bV').onclick = function () { pantallaAnularRecepcion(); });
+      }
+      pintar('<div class="aviso a-ok">Recepción ' + esc(folio) + ' anulada. ' +
+        (r.lotes || 0) + ' lote(s) y ' + (r.movimientos || 0) + ' movimiento(s) quitados. ' +
+        'El respaldo quedó en RECEPCIONES_ANULADAS.</div>' +
+        '<button class="b-ghost" id="bV">Volver</button>');
+      $('bV').onclick = function () { pantallaInicio(); };
+    } catch (e) {
+      alertar('Sin conexión: no se anuló nada.');
+      this.disabled = false; this.textContent = 'Anular';
+    }
+  };
+}
+
+/* =================================================================
+   Editar una plantilla
+   ================================================================= */
+
+async function pantallaPlantillaEditar(nombre) {
+  encabezado('Editar plantilla', nombre);
+  pintar('<div class="card"><p class="sub">Cargando…</p></div>');
+  try {
+    var r = await enviar({ accion: 'plantillas', plantilla: nombre }, true);
+    if (!r.ok) return pintar('<div class="aviso a-err">' + esc(r.error) + '</div>');
+    var items = r.items || [];
+
+    function reng(x, i) {
+      var heredado = !!x.de_base;
+      return '<div class="linea" data-i="' + i + '">' +
+        '<div class="cab"><div><div class="nm">' + esc(x.item) + '</div>' +
+        '<div class="datos">' + esc(x.sku || 'sin clave') +
+        (heredado ? ' · viene de la base' : '') + '</div></div>' +
+        '<button class="quitar" data-q="' + i + '">' + (heredado ? 'Quitar aquí' : 'Desactivar') + '</button></div>' +
+        '<div class="campo"><label>Cantidad</label>' +
+        '<input type="number" inputmode="decimal" step="any" min="0" data-cant="' + i + '" value="' + esc(x.cantidad) + '"></div>' +
+        '</div>';
+    }
+
+    pintar(
+      '<div class="card"><h3>' + items.length + ' renglón(es)</h3>' +
+      '<p class="mini">Cambiar la cantidad de un renglón heredado lo convierte en propio de esta ' +
+      'plantilla: la base no se toca. «Quitar aquí» saca un heredado sólo de esta plantilla.</p></div>' +
+      '<div id="pLista">' + items.map(reng).join('') + '</div>' +
+      '<div class="card"><h3>Agregar</h3>' +
+      '<div class="campo"><label>Insumo</label><input id="nItem" placeholder="Nombre como lo dice la lista"></div>' +
+      '<div class="dos">' +
+      '<div class="campo"><label>Clave</label><input id="nSku" placeholder="MED-050"></div>' +
+      '<div class="campo"><label>Cantidad</label><input id="nCant" type="number" step="any" min="0"></div>' +
+      '</div><button class="b-dark" id="bAdd">Agregar renglón</button></div>' +
+      '<button class="b-primary" id="bGuardar">Guardar cambios</button>' +
+      '<button class="b-ghost" id="bV">Volver</button>');
+
+    var cambios = {};
+    [].forEach.call(document.querySelectorAll('[data-cant]'), function (inp) {
+      inp.onchange = function () {
+        var i = +inp.getAttribute('data-cant');
+        cambios[i] = { plantilla: nombre, item: items[i].item, sku: items[i].sku,
+                       categoria: items[i].categoria || '', cantidad: inp.value,
+                       activo: 'SI', notas: items[i].notas || '',
+                       tipo: items[i].tipo || '' };
+      };
+    });
+    [].forEach.call(document.querySelectorAll('[data-q]'), function (b) {
+      b.onclick = function () {
+        var i = +b.getAttribute('data-q');
+        var x = items[i];
+        cambios[i] = x.de_base
+          ? { plantilla: nombre, item: x.item, sku: x.sku, cantidad: x.cantidad,
+              activo: 'SI', tipo: 'QUITA', notas: 'Quitado de esta plantilla' }
+          : { plantilla: nombre, item: x.item, sku: x.sku, cantidad: x.cantidad,
+              activo: 'NO', notas: x.notas || '', tipo: x.tipo || '' };
+        b.textContent = 'Marcado';
+        b.disabled = true;
+      };
+    });
+
+    var nuevos = [];
+    $('bAdd').onclick = function () {
+      var item = ($('nItem').value || '').trim();
+      if (!item) return alertar('Falta el nombre del insumo.');
+      nuevos.push({ plantilla: nombre, item: item, sku: ($('nSku').value || '').trim(),
+                    cantidad: $('nCant').value || 1, activo: 'SI', categoria: '', notas: '' });
+      $('nItem').value = ''; $('nSku').value = ''; $('nCant').value = '';
+      alertar(nuevos.length + ' renglón(es) por agregar. Guarda para que queden.');
+    };
+
+    $('bGuardar').onclick = async function () {
+      var filas = Object.keys(cambios).map(function (k) { return cambios[k]; }).concat(nuevos);
+      if (!filas.length) return alertar('No cambiaste nada.');
+      this.disabled = true; this.textContent = 'Guardando…';
+      var res = await enviar({ accion: 'plantilla_guardar', filas: filas }, true);
+      if (!res.ok) { alertar(res.error); this.disabled = false;
+                     this.textContent = 'Guardar cambios'; return; }
+      alertar('Guardado: ' + (res.agregadas || 0) + ' nuevos, ' + (res.actualizadas || 0) + ' cambiados.');
+      pantallaPlantillaEditar(nombre);
+    };
+    $('bV').onclick = function () { pantallaPlantillas(); };
+  } catch (e) {
+    pintar('<div class="aviso a-err">Sin conexión.</div><button class="b-ghost" id="bV">Volver</button>');
+    $('bV').onclick = function () { pantallaPlantillas(); };
+  }
+}
+
+/* =================================================================
+   Editar la lista de una dotación
+   ================================================================= */
+
+async function pantallaDotacionEditar(ubic) {
+  encabezado('Editar dotación', ubic);
+  pintar('<div class="card"><p class="sub">Cargando…</p></div>');
+  try {
+    var r = await enviar({ accion: 'dotacion', ubicacion: ubic }, true);
+    if (!r.ok) return pintar('<div class="aviso a-err">' + esc(r.error) + '</div>');
+
+    var todos = r.renglones.map(function (x) {
+      return { item: x.item, sku: x.sku, cantidad: x.pide, tipo: 'INSUMO' }; })
+      .concat(r.equipo.map(function (x) {
+        return { item: x.item, sku: x.folio_pedido || '', cantidad: x.pide, tipo: 'ACTIVO' }; }));
+
+    function reng(x, i) {
+      return '<div class="linea">' +
+        '<div class="cab"><div><div class="nm">' + esc(x.item) + '</div>' +
+        '<div class="datos">' + esc(x.sku || 'sin clave') + ' · ' + x.tipo + '</div></div>' +
+        '<button class="quitar" data-q="' + i + '">Quitar</button></div>' +
+        '<div class="campo"><label>Cantidad</label>' +
+        '<input type="number" inputmode="decimal" step="any" min="0" data-cant="' + i + '" value="' + esc(x.cantidad) + '"></div>' +
+        '</div>';
+    }
+
+    pintar(
+      '<div class="card"><h3>' + r.nombre + '</h3>' +
+      '<p class="mini">Un <b>insumo</b> se mide contra la existencia del almacén. Un <b>equipo</b> se mide ' +
+      'contra el registro de activos: ahí la clave es el folio del aparato (ACT-00127), no una clave de catálogo.</p></div>' +
+      '<div>' + todos.map(reng).join('') + '</div>' +
+      '<div class="card"><h3>Agregar</h3>' +
+      '<div class="campo"><label>Qué</label><input id="dItem" placeholder="Nombre"></div>' +
+      '<div class="dos">' +
+      '<div class="campo"><label>Clave o folio</label><input id="dSku" placeholder="MED-050 o ACT-00127"></div>' +
+      '<div class="campo"><label>Cantidad</label><input id="dCant" type="number" step="any" min="0" value="1"></div>' +
+      '</div>' +
+      '<div class="campo"><label>Tipo</label><select id="dTipo">' +
+      '<option value="INSUMO">Insumo — se mide por existencia</option>' +
+      '<option value="ACTIVO">Equipo — se mide por activo asignado</option>' +
+      '</select></div>' +
+      '<button class="b-dark" id="bAdd">Agregar</button></div>' +
+      '<button class="b-primary" id="bGuardar">Guardar cambios</button>' +
+      '<button class="b-ghost" id="bV">Volver</button>');
+
+    var cambios = {}, nuevos = [];
+    [].forEach.call(document.querySelectorAll('[data-cant]'), function (inp) {
+      inp.onchange = function () {
+        var i = +inp.getAttribute('data-cant');
+        cambios[i] = Object.assign({}, todos[i], { ubicacion: ubic, cantidad: inp.value, activo: 'SI' });
+      };
+    });
+    [].forEach.call(document.querySelectorAll('[data-q]'), function (b) {
+      b.onclick = function () {
+        var i = +b.getAttribute('data-q');
+        cambios[i] = Object.assign({}, todos[i], { ubicacion: ubic, activo: 'NO' });
+        b.textContent = 'Marcado'; b.disabled = true;
+      };
+    });
+    $('bAdd').onclick = function () {
+      var item = ($('dItem').value || '').trim();
+      if (!item) return alertar('Falta el nombre.');
+      nuevos.push({ ubicacion: ubic, item: item, sku: ($('dSku').value || '').trim(),
+                    cantidad: $('dCant').value || 1, tipo: $('dTipo').value, activo: 'SI' });
+      $('dItem').value = ''; $('dSku').value = ''; $('dCant').value = '1';
+      alertar(nuevos.length + ' por agregar. Guarda para que queden.');
+    };
+    $('bGuardar').onclick = async function () {
+      var filas = Object.keys(cambios).map(function (k) { return cambios[k]; }).concat(nuevos);
+      if (!filas.length) return alertar('No cambiaste nada.');
+      this.disabled = true; this.textContent = 'Guardando…';
+      var res = await enviar({ accion: 'dotacion_guardar', filas: filas }, true);
+      if (!res.ok) { alertar(res.error); this.disabled = false;
+                     this.textContent = 'Guardar cambios'; return; }
+      pantallaDotacion(ubic);
+    };
+    $('bV').onclick = function () { pantallaDotacion(ubic); };
+  } catch (e) {
+    pintar('<div class="aviso a-err">Sin conexión.</div><button class="b-ghost" id="bV">Volver</button>');
+    $('bV').onclick = function () { pantallaDotacion(ubic); };
+  }
+}
+
+/* =================================================================
+   Usuarios y ubicaciones
+   ================================================================= */
+
+async function pantallaUsuarios() {
+  encabezado('Usuarios', 'Quién entra y con qué rol');
+  pintar('<div class="card"><p class="sub">Cargando…</p></div>');
+  try {
+    var r = await enviar({ accion: 'usuarios' }, true);
+    if (!r.ok) return pintar('<div class="aviso a-err">' + esc(r.error) + '</div>' +
+      '<button class="b-ghost" onclick="pantallaInicio()">Volver</button>');
+
+    var roles = ['DIRECTOR','GERENCIA','ALMACEN','ANESTESIOLOGIA','ENFERMERIA','CONSULTA'];
+
+    pintar(
+      '<div class="card"><h3>' + r.usuarios.length + ' usuario(s)</h3><div class="lista">' +
+      r.usuarios.map(function (u) {
+        var baja = String(u.activo).toUpperCase() === 'NO';
+        return '<div class="item"><div class="l"><span>' + esc(u.correo) + '</span>' +
+          '<div>' + esc(u.nombre || u.usuario) + '</div></div>' +
+          '<span class="pill ' + (baja ? 'p-neutral' : 'p-ok') + '">' +
+          esc(baja ? 'baja' : u.rol) + '</span></div>';
+      }).join('') + '</div></div>' +
+
+      '<div class="card"><h3>Dar de alta</h3>' +
+      '<div class="campo"><label>Correo de Google</label><input id="uCorreo" type="email" placeholder="nombre@gmail.com"></div>' +
+      '<div class="campo"><label>Nombre</label><input id="uNombre"></div>' +
+      '<div class="campo"><label>Rol</label><select id="uRol">' +
+      roles.map(function (x) { return '<option>' + x + '</option>'; }).join('') + '</select></div>' +
+      '<button class="b-dark" id="bAlta">Dar de alta</button>' +
+      '<p class="mini">Entra con Google, sin contraseña. Si el correo ya existe, se avisa en vez de pisarlo: ' +
+      'cambiarle el rol a alguien sin querer es como quitarle o darle permisos a ciegas.</p></div>' +
+
+      '<button class="b-ghost" id="bUbic">Dar de alta una ubicación</button>' +
+      '<button class="b-ghost" id="bV">Volver</button>');
+
+    $('bAlta').onclick = async function () {
+      var correo = ($('uCorreo').value || '').trim().toLowerCase();
+      var nombre = ($('uNombre').value || '').trim();
+      if (!correo || correo.indexOf('@') < 0) return alertar('Falta un correo válido.');
+      if (!nombre) return alertar('Falta el nombre.');
+      this.disabled = true;
+      var res = await enviar({ accion: 'usuario_alta',
+        usuario_nuevo: { correo: correo, nombre: nombre, rol: $('uRol').value } }, true);
+      if (!res.ok) { alertar(res.error); this.disabled = false; return; }
+      pantallaUsuarios();
+    };
+    $('bUbic').onclick = function () { pantallaUbicacionNueva(); };
+    $('bV').onclick = function () { pantallaInicio(); };
+  } catch (e) {
+    pintar('<div class="aviso a-err">Sin conexión.</div><button class="b-ghost" id="bV">Volver</button>');
+    $('bV').onclick = function () { pantallaInicio(); };
+  }
+}
+
+function pantallaUbicacionNueva() {
+  encabezado('Nueva ubicación', 'Dónde puede estar el material');
+  var tipos = ['ALMACEN','SUBALMACEN','QUIROFANO','CONSULTORIO','CABINA',
+               'CUARENTENA','DOTACION','RESIDUOS','MERMA','OTRO'];
+  pintar(
+    '<div class="card">' +
+    '<div class="campo"><label>Clave</label><input id="uId" placeholder="ZVX-P1-NUEVA" autocomplete="off"></div>' +
+    '<div class="campo"><label>Nombre</label><input id="uNom" placeholder="Como la llaman en Zorvix"></div>' +
+    '<div class="campo"><label>Tipo</label><select id="uTipo">' +
+    tipos.map(function (t) { return '<option>' + t + '</option>'; }).join('') + '</select></div>' +
+    '<div class="campo"><label>Almacén del que cuelga (opcional)</label>' +
+    '<select id="uPadre"><option value="">— ninguno —</option>' +
+    ((estado.cat && estado.cat.almacenes) || []).map(function (a) {
+      return '<option value="' + esc(a.id) + '">' + esc(a.nombre) + '</option>'; }).join('') +
+    '</select></div>' +
+    '<button class="b-dark" id="bCrear">Dar de alta</button>' +
+    '<p class="mini">Una ubicación mal escrita parte el saldo en dos sin avisar: los movimientos ' +
+    'apuntan a una clave que nadie reconoce y no sale ningún error. Por eso la clave sólo admite ' +
+    'letras, números y guiones, y no se puede repetir.</p>' +
+    '</div>' +
+    '<button class="b-ghost" id="bV">Volver</button>');
+
+  $('bV').onclick = function () { pantallaUsuarios(); };
+  $('bCrear').onclick = async function () {
+    var id = ($('uId').value || '').trim().toUpperCase();
+    var nom = ($('uNom').value || '').trim();
+    if (!id) return alertar('Falta la clave.');
+    if (!nom) return alertar('Falta el nombre.');
+    this.disabled = true;
+    var r = await enviar({ accion: 'ubicacion_alta', ubic_id: id, nombre: nom,
+                           tipo: $('uTipo').value, almacen_padre: $('uPadre').value }, true);
+    if (!r.ok) { alertar(r.error); this.disabled = false; return; }
+    alertar('Ubicación ' + r.ubic_id + ' creada.');
+    pantallaUsuarios();
+  };
+}
+
+/* =================================================================
    Dotaciones selladas
    =================================================================
    Carros rojos y cajas de urgencia. No se miden por consumo como una caja
@@ -1101,6 +1688,7 @@ async function pantallaDotacion(ubic) {
            : 'Nunca se ha sellado.') + '</p>' +
       '<div class="b-fila"><button class="b-dark" id="bSellar">Sellar</button>' +
       '<button class="b-ghost" id="bAbrir">Registrar apertura</button></div></div>' +
+      '<button class="b-ghost" id="bEditarDot">Editar qué debe vivir aquí</button>' +
 
       (r.equipo.length
         ? '<div class="card"><h3>Equipo (' + r.equipo.length + ')</h3>' +
@@ -1151,6 +1739,7 @@ async function pantallaDotacion(ubic) {
       if (!res.ok) { alertar(res.error); this.disabled = false; return; }
       pantallaDotacion(ubic);
     };
+    $('bEditarDot').onclick = function () { pantallaDotacionEditar(ubic); };
     $('bV').onclick = function () { pantallaDotaciones(); };
   } catch (e) {
     pintar('<div class="aviso a-err">Sin conexión.</div><button class="b-ghost" id="bV">Volver</button>');
@@ -1579,7 +2168,9 @@ async function pantallaCajas() {
   pintar(
     '<div class="card"><h3>Abrir una caja</h3>' +
     '<p class="sub">Se abre antes de surtir. El folio que salga es la identidad de esa caja hasta que el paciente se va de alta.</p>' +
-    '<button class="b-primary" id="bNueva">Nueva caja</button></div>' +
+    '<div class="b-fila">' +
+    '<button class="b-primary" id="bArmar">Armar contra plantilla</button>' +
+    '<button class="b-ghost" id="bNueva">Caja vacía</button></div></div>' +
 
     '<div class="card"><h3>' + (r.cajas || []).length + ' caja(s) abierta(s)</h3>' +
     (lista
@@ -1591,6 +2182,7 @@ async function pantallaCajas() {
   Array.prototype.forEach.call(document.querySelectorAll('.item-abre'), function (el) {
     el.onclick = function () { pantallaCajaDetalle(this.getAttribute('data-caja')); };
   });
+  $('bArmar').onclick = function () { pantallaCajaArmar(); };
   $('bNueva').onclick = function () { pantallaCajaNueva(); };
   $('bV').onclick = function () { pantallaInicio(); };
 }
@@ -2672,8 +3264,10 @@ async function pantallaPlantilla(nombre, soloPendientes) {
     '<button class="' + (soloPendientes ? 'b-dark' : 'b-ghost') + '" id="bPend">Sólo los que faltan</button>' +
     '</div></div>' +
     '<div class="card">' + (cuerpo || '<p class="sub centro">Nada que mostrar aquí.</p>') + '</div>' +
+    '<button class="b-dark" id="bEditarPl">Editar esta plantilla</button>' +
     '<button class="b-ghost" id="bV">Volver a plantillas</button>');
 
+  $('bEditarPl').onclick = function () { pantallaPlantillaEditar(nombre); };
   $('bTodos').onclick = function () { pantallaPlantilla(nombre, false); };
   $('bPend').onclick = function () { pantallaPlantilla(nombre, true); };
   $('bV').onclick = function () { pantallaPlantillas(); };
