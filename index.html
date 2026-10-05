@@ -1162,7 +1162,8 @@ async function pantallaAgenda() {
   encabezado('Agenda', 'Cirugías programadas');
   pintar('<div class="card"><p class="sub">Leyendo la agenda…</p></div>');
   try {
-    var r = await enviar({ accion: 'agenda' }, true);
+    var r = await enviar({ accion: 'agenda', dias: estado.agendaDias || 30,
+                           atras: estado.agendaAtras || 3 }, true);
     if (!r.ok) {
       pintar('<div class="aviso a-err">' + esc(r.error) + '</div>' +
              '<button class="b-ghost" id="bV">Volver</button>');
@@ -1214,6 +1215,9 @@ async function pantallaAgenda() {
           r.dias + ' días.</p></div>') +
       '<p class="mini">La agenda sólo se lee: esta app nunca escribe en AltaZorvix. ' +
       'La caja queda amarrada al folio del caso, no al nombre del paciente.</p>' +
+      '<button class="b-ghost" id="bMas">' +
+        (estado.agendaDias > 30 ? 'Ver sólo el próximo mes' : 'Ver más atrás y más adelante') +
+      '</button>' +
       '<button class="b-ghost" id="bV">Volver</button>');
 
     [].forEach.call(document.querySelectorAll('[data-fijar]'), function (b) {
@@ -1235,6 +1239,12 @@ async function pantallaAgenda() {
                             procedimiento: c.plantilla });
       };
     });
+    $('bMas').onclick = function () {
+      var ancho = (estado.agendaDias || 30) > 30;
+      estado.agendaDias = ancho ? 30 : 180;
+      estado.agendaAtras = ancho ? 3 : 120;
+      pantallaAgenda();
+    };
     $('bV').onclick = function () { pantallaInicio(); };
   } catch (e) {
     pintar('<div class="aviso a-err">Sin conexión.</div><button class="b-ghost" id="bV">Volver</button>');
