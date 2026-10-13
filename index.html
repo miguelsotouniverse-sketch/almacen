@@ -1068,13 +1068,14 @@ function pantallaCajaArmar(pre) {
         return '<option' + (n === pre.procedimiento ? ' selected' : '') + '>' + esc(n) + '</option>';
       }).join('') +
     '</select></div>' +
-    '<div class="campo"><label>De qué almacenes se puede tomar</label>' +
-      c.almacenes.map(function (a, i) {
-        return '<label class="check"><input type="checkbox" class="aAlm" value="' + esc(a.id) + '"' +
-               (i === 0 ? ' checked' : '') + '>' + esc(a.nombre) + '</label>';
+    '<div class="campo"><label>De dónde se toma</label>' +
+      c.almacenes.map(function (a) {
+        return '<label class="check"><input type="checkbox" class="aAlm" value="' +
+               esc(a.id) + '" checked>' + esc(a.nombre) + '</label>';
       }).join('') +
-      '<p class="mini">El primero marcado es el almacén de la caja. Marcar varios no reparte ' +
-      'de más: toma lo que primero se vence, esté en el que esté.</p></div>' +
+      '<p class="mini">Vienen todos marcados a propósito: aquí el material no está ' +
+      'en un solo lugar. Toma lo que primero se vence, esté donde esté, y el primero ' +
+      'de la lista es nada más por dónde empezar.</p></div>' +
     '<button class="b-dark" id="bVer">Ver qué saldría</button>' +
     '<p class="mini">Primero en seco: nada se mueve hasta que lo confirmes.</p>' +
     '</div>' +
@@ -2360,10 +2361,12 @@ function pantallaCajaNueva() {
     '<datalist id="lproc">' +
     PROCEDIMIENTOS.map(function (p) { return '<option value="' + esc(p) + '">'; }).join('') +
     '</datalist></div>' +
-    '<div class="campo"><label>Almacén que surte</label><select id="cAlm">' +
+    '<div class="campo"><label>¿Dónde vas a estar?</label><select id="cAlm">' +
     c.almacenes.map(function (a) {
       return '<option value="' + esc(a.id) + '">' + esc(a.nombre) + '</option>';
-    }).join('') + '</select></div>' +
+    }).join('') + '</select>' +
+    '<p class="mini">Sólo para que la lista te salga ordenada desde ahí. La caja puede ' +
+    'tomar de cualquier almacén.</p></div>' +
     '<button class="b-primary" id="bCrear">Abrir la caja</button>' +
     '<button class="b-ghost" id="bV">Cancelar</button></div>');
 
@@ -2482,17 +2485,36 @@ async function pantallaCajaDetalle(cajaId) {
 async function pantallaCajaMover(cajaId, sentido) {
   var esSalida = sentido !== 'RETORNO';
   encabezado(esSalida ? 'Sacar material' : 'Registrar retorno', cajaId);
+  /* La lista trae los dos almacenes y CEyE. Lo que no está en el almacén de
+     la caja viene marcado con dónde está, para no caminar a ciegas. */
   pintar('<div class="card"><p class="sub">Cargando…</p></div>');
 
   var caja = (estado.cajaActual && estado.cajaActual.caja) || null;
   var disponibles = [];
   try {
     if (esSalida) {
-      var e = await enviar({ accion: 'existencias', almacen: caja.almacen }, true);
+      /* Todos los almacenes, no sólo el de la caja. En Zorvix están a diez
+         metros uno de otro y el fentanilo vive en el Almacén del personal
+         mientras casi todo lo demás vive en Farmacia: filtrar por uno solo
+         hacía que ni apareciera en la lista, y quien surte lo lee como que
+         no hay. De un carro rojo o de otra caja NO se surte. */
+      var e = await enviar({ accion: 'existencias' }, true);
       if (!e.ok) return pintar('<div class="aviso a-err">' + esc(e.error) + '</div>');
-      disponibles = e.existencias.map(function (x) {
+      var dela = String(caja.almacen || '').toUpperCase();
+      disponibles = e.existencias.filter(function (x) {
+        var t = String(x.ubic_tipo || '').toUpperCase();
+        return t === 'ALMACEN' || t === 'CLINICA';
+      }).map(function (x) {
         return { sku: x.sku, lote_id: x.lote_id, nombre: x.nombre,
-                 caducidad: x.caducidad, disponible: x.cantidad };
+                 caducidad: x.caducidad, disponible: x.cantidad,
+                 ubic_id: x.ubic_id, ubic_nombre: x.ubic_nombre,
+                 propio: String(x.ubic_id).toUpperCase() === dela };
+      });
+      /* Primero lo que está en el almacén de la caja: es donde está parado
+         quien surte, y así no camina de más sin necesidad. */
+      disponibles.sort(function (a, b) {
+        if (a.propio !== b.propio) return a.propio ? -1 : 1;
+        return String(a.nombre).localeCompare(String(b.nombre));
       });
     } else {
       disponibles = estado.cajaActual.lineas.filter(function (l) { return l.en_caja > 0; })
@@ -2514,8 +2536,10 @@ async function pantallaCajaMover(cajaId, sentido) {
       if (!f) return true;
       return (d.nombre + ' ' + d.sku + ' ' + d.lote_id).toLowerCase().indexOf(f) >= 0;
     }).slice(0, 120).map(function (d) {
-      return '<option value="' + esc(d.lote_id) + '">' + esc(d.nombre) +
+      return '<option value="' + esc(d.lote_id) + '" data-ubic="' +
+        esc(d.ubic_id || '') + '">' + esc(d.nombre) +
         ' · ' + esc(d.lote_id) + ' · hay ' + esc(d.disponible) +
+        (d.ubic_nombre && !d.propio ? ' · EN ' + esc(d.ubic_nombre) : '') +
         (d.caducidad ? ' · cad ' + esc(d.caducidad) : '') + '</option>';
     }).join('');
   }
@@ -2524,7 +2548,8 @@ async function pantallaCajaMover(cajaId, sentido) {
     var capturado = lineas.map(function (l, i) {
       return '<div class="linea"><div class="cab"><div>' +
         '<div class="nm">' + esc(l.nombre) + '</div>' +
-        '<div class="datos">' + esc(l.lote_id) + ' · ' + esc(l.cantidad) + '</div>' +
+        '<div class="datos">' + esc(l.lote_id) + ' · ' + esc(l.cantidad) +
+        (l.ubic_nombre ? ' · de ' + esc(l.ubic_nombre) : '') + '</div>' +
         '</div><button class="quitar" data-i="' + i + '">Quitar</button></div></div>';
     }).join('');
 
@@ -2566,7 +2591,14 @@ async function pantallaCajaMover(cajaId, sentido) {
     $('mAdd').onclick = function () {
       var folio = $('mLote').value;
       var d = null;
-      disponibles.forEach(function (x) { if (x.lote_id === folio) d = x; });
+      var sel = $('mLote').selectedIndex;
+      var ops = $('mLote').options;
+      var marca = sel >= 0 && ops[sel] ? ops[sel].getAttribute('data-ubic') : '';
+      disponibles.forEach(function (x) {
+        if (x.lote_id !== folio) return;
+        if (marca && String(x.ubic_id || '') !== marca) return;
+        if (!d) d = x;
+      });
       if (!d) return alertar('Elige un lote de la lista.');
 
       var cant = parseFloat($('mCant').value);
@@ -2575,13 +2607,18 @@ async function pantallaCajaMover(cajaId, sentido) {
       /* Lo que ya se capturó en esta misma pantalla también gasta
          existencia: si no se suma, se puede pedir dos veces lo mismo. */
       var yaPedido = 0;
-      lineas.forEach(function (l) { if (l.lote_id === folio) yaPedido += l.cantidad; });
+      lineas.forEach(function (l) {
+        if (l.lote_id !== folio) return;
+        if ((l.ubic_id || '') !== (d.ubic_id || '')) return;
+        yaPedido += l.cantidad;
+      });
       if (cant + yaPedido - d.disponible > 0.0001) {
         return alertar('Solo hay ' + d.disponible + ' de ' + folio +
           (yaPedido ? ' y ya capturaste ' + yaPedido + '.' : '.'));
       }
 
-      lineas.push({ sku: d.sku, lote_id: d.lote_id, nombre: d.nombre, cantidad: cant });
+      lineas.push({ sku: d.sku, lote_id: d.lote_id, nombre: d.nombre, cantidad: cant,
+                    ubic_id: d.ubic_id, ubic_nombre: d.ubic_nombre });
       dibujar();
     };
 
@@ -2594,7 +2631,9 @@ async function pantallaCajaMover(cajaId, sentido) {
           sentido: esSalida ? 'SALIDA' : 'RETORNO',
           adicional: !!estado.cajaSurtida,
           lineas: lineas.map(function (l) {
-            return { sku: l.sku, lote_id: l.lote_id, cantidad: l.cantidad };
+            return { sku: l.sku, lote_id: l.lote_id, cantidad: l.cantidad,
+                     ubic_origen: l.ubic_origen || (esSalida ? l.ubic_id : ''),
+                     ubic_destino: esSalida ? '' : (l.ubic_id || '') };
           })
         }, true);
         if (!r.ok) {
