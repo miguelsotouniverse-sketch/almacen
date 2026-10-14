@@ -194,6 +194,20 @@ button:disabled{opacity:.5}
 button+button{margin-top:9px}
 .b-fila button+button{margin-top:0}
 
+.masmenos{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.masmenos .uno{
+  width:30px;height:30px;border-radius:7px;border:1px solid var(--rule);
+  background:#fff;color:var(--ink);font-size:17px;line-height:1;padding:0;
+  cursor:pointer;flex-shrink:0;
+}
+.masmenos .uno:disabled{opacity:.3;cursor:default}
+.masmenos .uno.mas{border-color:var(--accent);color:var(--accent-deep)}
+.grupo-caja{
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;letter-spacing:.12em;text-transform:uppercase;
+  color:var(--accent);margin:14px 0 4px;padding-bottom:3px;
+  border-bottom:1px solid var(--rule);
+}
+.grupo-caja:first-child{margin-top:4px}
 .pill{display:inline-block;font-family:'IBM Plex Mono',monospace;font-size:.62rem;
   padding:3px 8px;border-radius:3px;letter-spacing:.05em}
 .p-ok{background:var(--tint-ok);color:var(--ok)}
@@ -2286,8 +2300,16 @@ function pantallaFolios(r) {
 function esCaja(id) { return /^CAJA-/i.test(String(id || '')); }
 
 /** Etiqueta grande y legible de un renglón de caja. */
-function filaCaja(l) {
+function filaCaja(l, i, cerrada) {
   var falta = l.en_caja > 0;
+  /* El + saca una pieza más de ESE lote y el − la regresa. Sin salir de la
+     pantalla: a media cirugía piden una gasa más, y si para capturar una
+     pieza hay que entrar a un formulario, no se captura. */
+  var mas = cerrada ? '' :
+    '<button class="uno mas" data-i="' + i + '" title="Sacar una más">+</button>';
+  var menos = cerrada ? '' :
+    '<button class="uno menos" data-i="' + i + '"' + (falta ? '' : ' disabled') +
+    ' title="Regresar una">&minus;</button>';
   return '<div class="linea"><div class="cab"><div>' +
     '<div class="nm">' + esc(l.nombre) + '</div>' +
     '<div class="datos">' + esc(l.lote_id) +
@@ -2297,9 +2319,43 @@ function filaCaja(l) {
       (l.consumido ? ' · consumido ' + esc(l.consumido) : '') +
       ' ' + esc(l.unidad || '') +
     '</div></div>' +
-    '<span class="pill ' + (falta ? 'p-warn' : 'p-neutral') + ' mono">' +
-      esc(l.en_caja) + '</span>' +
+    '<div class="masmenos">' + menos +
+      '<span class="pill ' + (falta ? 'p-warn' : 'p-neutral') + ' mono">' +
+        esc(l.en_caja) + '</span>' + mas +
+    '</div>' +
     '</div></div>';
+}
+
+/* Agrupa igual que la hoja impresa: el backend ya manda las líneas en ese
+   orden y con su familia, aquí sólo se dibujan los encabezados. */
+function filasCajaAgrupadas(lineas, cerrada) {
+  var out = '', grupo = null;
+  lineas.forEach(function (l, i) {
+    var g = l.grupo_nombre || l.grupo || '';
+    if (g !== grupo) { grupo = g; out += '<div class="grupo-caja">' + esc(g) + '</div>'; }
+    out += filaCaja(l, i, cerrada);
+  });
+  return out;
+}
+
+/* Mueve UNA pieza del renglón que se tocó. El origen lo resuelve el servidor:
+   el lote puede estar en cualquiera de los almacenes. */
+async function ajustarUna(cajaId, linea, sentido, boton) {
+  if (boton.disabled) return;
+  boton.disabled = true;
+  try {
+    var r = await enviar({
+      accion: 'caja_mover', caja_id: cajaId,
+      sentido: sentido, adicional: sentido === 'SALIDA',
+      lineas: [{ sku: linea.sku, lote_id: linea.lote_id, cantidad: 1 }]
+    }, true);
+    if (!r.ok) { boton.disabled = false; return alertar(r.error); }
+    pantallaCajaDetalle(cajaId);
+  } catch (e) {
+    boton.disabled = false;
+    alertar('Sin conexión. Este movimiento necesita señal porque valida la ' +
+            'existencia contra el servidor.');
+  }
 }
 
 async function pantallaCajas() {
@@ -2434,8 +2490,9 @@ async function pantallaCajaDetalle(cajaId) {
 
     '<div class="card"><h3>Contenido</h3>' +
     (r.lineas.length
-      ? '<p class="mini">La cifra de la derecha es lo que la caja trae encima ahora. Al cerrar, eso es el consumo.</p>' +
-        r.lineas.map(filaCaja).join('')
+      ? '<p class="mini">La cifra de en medio es lo que la caja trae encima ahora. Al cerrar, eso es el consumo.' +
+        (cerrada ? '' : ' Con + sacas una pieza más de ese lote y con &minus; la regresas.') + '</p>' +
+        filasCajaAgrupadas(r.lineas, cerrada)
       : '<p class="sub centro">La caja está vacía. Empieza por «Sacar material».</p>') +
     '</div>' +
 
@@ -2455,6 +2512,14 @@ async function pantallaCajaDetalle(cajaId) {
       alertar('No se pudieron preparar las hojas. Intenta de nuevo.');
     }
   };
+
+  Array.prototype.forEach.call(document.querySelectorAll('.uno'), function (b) {
+    b.onclick = function () {
+      var l = r.lineas[parseInt(this.getAttribute('data-i'), 10)];
+      if (!l) return;
+      ajustarUna(cajaId, l, this.classList.contains('mas') ? 'SALIDA' : 'RETORNO', this);
+    };
+  });
 
   if ($('bSacar')) $('bSacar').onclick = function () { pantallaCajaMover(cajaId, 'SALIDA'); };
   if ($('bRegresar')) $('bRegresar').onclick = function () { pantallaCajaMover(cajaId, 'RETORNO'); };
