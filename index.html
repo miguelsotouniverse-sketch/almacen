@@ -238,6 +238,14 @@ label.check input{width:19px;height:19px;margin:1px 0 0;flex:0 0 auto;accent-col
 .a-err{background:var(--tint-crit);color:var(--crit)}
 .a-warn{background:var(--tint-warn);color:var(--warn)}
 .a-info{background:var(--tint-accent);color:var(--accent-deep)}
+/* Neutro: un aviso que informa sin pedir nada. El de "no se abrió ninguno"
+   cambia a warn en cuanto sí se abre algo, y ese contraste es el que avisa. */
+.a-neutral{background:#F1EEEB;color:var(--ink-2)}
+/* Botón que vive dentro de un renglón de lista: no ocupa el ancho. */
+.b-chico{
+  width:auto;flex-shrink:0;padding:7px 13px;font-size:.85rem;border-radius:7px;
+  background:var(--ink);color:#F4F2F1;margin:0;
+}
 
 .lista .item{display:flex;justify-content:space-between;gap:10px;align-items:center;
   padding:11px 0;border-bottom:1px solid var(--rule-soft)}
@@ -307,6 +315,10 @@ label.check input{width:19px;height:19px;margin:1px 0 0;flex:0 0 auto;accent-col
 .baldosa.ancha{grid-column:1 / -1}
 .baldosa.fuerte{background:var(--ink);color:#F4F2F1;border-color:var(--ink)}
 .baldosa.fuerte .q{color:#9AA09C}
+/* Una baldosa que pide atención hoy. Se reserva para lo que bloquea algo:
+   si la usara cualquier pendiente, dejaría de verse. */
+.baldosa.urge{border-color:var(--warn)}
+.baldosa.urge .q{color:var(--warn)}
 
 details.mas{margin-bottom:14px}
 details.mas>summary{cursor:pointer;list-style:none;font-family:'IBM Plex Mono',monospace;
@@ -701,6 +713,7 @@ function pantallaInicio() {
     '<button class="baldosa" id="bArmar">¿Se puede armar?<span class="q">Plantilla contra existencia</span></button>' +
     '<button class="baldosa" id="bCompra">Lista de compra<span class="q">Qué pedir</span></button>' +
     '<button class="baldosa" id="bDot">Carros y cajas selladas<span class="q">Urgencias</span></button>' +
+    '<button class="baldosa" id="bLibro">Libro de controlados<span class="q">Lo que falta registrar</span></button>' +
     '<button class="baldosa" id="bAgenda">Agenda<span class="q">Armar desde el caso programado</span></button>' +
     '<button class="baldosa" id="bCatalogo">Catálogo<span class="q">Qué es cada insumo</span></button>' +
     (['DIRECTOR','GERENCIA'].indexOf(String(estado.sesion && estado.sesion.rol).toUpperCase()) >= 0
@@ -749,6 +762,7 @@ function pantallaInicio() {
   $('bArmar').onclick = function () { pantallaSurtido(); };
   $('bCompra').onclick = function () { pantallaCompra(); };
   $('bDot').onclick = function () { pantallaDotaciones(); };
+  $('bLibro').onclick = function () { pantallaLibro(); };
   $('bAgenda').onclick = function () { pantallaAgenda(); };
   $('bCatalogo').onclick = function () { pantallaCatalogo(''); };
   $('bPlant').onclick = function () { pantallaPlantillas(); };
@@ -768,6 +782,24 @@ function pantallaInicio() {
 
   pintarEstado();
   cargarTablero();
+  cargarLibro();
+}
+
+/* El número del libro llega después, como el tablero: la portada tiene que
+   responder desde el primer instante. Va en la baldosa y no en un tablero
+   aparte porque es ahí donde se entra a atenderlo. */
+async function cargarLibro() {
+  var b = $('bLibro');
+  if (!b) return;
+  try {
+    var r = await enviar({ accion: 'ministracion_pendientes' }, true);
+    if (!r.ok || !$('bLibro')) return;
+    var q = $('bLibro').querySelector('.q');
+    if (!q) return;
+    if (!r.total) { q.textContent = 'Al corriente'; return; }
+    q.textContent = r.total + ' renglón(es) en ' + r.cajas + ' cirugía(s)';
+    $('bLibro').classList.add('urge');
+  } catch (e) { /* la portada se queda como está: no es información que valga una alarma falsa */ }
 }
 
 /* El tablero llega después de pintar la portada: los botones tienen que
@@ -2450,6 +2482,229 @@ function pantallaCajaNueva() {
   $('bV').onclick = function () { pantallaCajas(); };
 }
 
+/* Los controlados NO están en la caja. El bloque existe para decirlo: si no
+   aparecieran por ningún lado, quien surte los buscaría adentro. */
+function bloqueControlados(lista, cerrada) {
+  if (!lista.length) return '';
+  var falta = lista.filter(function (x) {
+    return String(x.estado).toUpperCase() !== 'CAPTURADA';
+  }).length;
+
+  return '<div class="card"><h3>Controlados</h3>' +
+    '<p class="mini">No van dentro de la caja: se surten contra receta, pieza por pieza, ' +
+    'y se registran en el libro de control.' +
+    (falta && !cerrada ? ' La caja no cierra hasta que estén los ' + falta + ' renglones.' : '') +
+    '</p>' +
+    '<div class="lista">' +
+    lista.map(function (x) {
+      var ok = String(x.estado).toUpperCase() === 'CAPTURADA';
+      return '<div class="item"><div class="l">' +
+        '<div>' + esc(x.nombre || x.sku) + '</div>' +
+        '<div class="mini mono">' +
+          (ok
+            ? 'tomadas ' + esc(x.tomadas) + ' · devueltas ' + esc(x.devueltas) +
+              ' · abiertas ' + esc(x.abiertas) +
+              (x.folio_libro ? ' · libro ' + esc(x.folio_libro) : '')
+            : 'la plantilla preveía ' + esc(x.previsto) + ' pieza(s)') +
+        '</div></div>' +
+        (ok
+          ? '<span class="pill p-ok">en el libro</span>'
+          : (cerrada
+              ? '<span class="pill p-warn">sin registrar</span>'
+              : '<button class="b-chico" data-min="' + esc(x.min_id) + '">Registrar</button>')) +
+        '</div>';
+    }).join('') +
+    '</div></div>';
+}
+
+/* Qué cirugías traen el libro pendiente. */
+async function pantallaLibro() {
+  encabezado('Libro de controlados', 'Lo que falta registrar');
+  pintar('<div class="card"><p class="sub">Cargando…</p></div>');
+  var r;
+  try {
+    r = await enviar({ accion: 'ministracion_pendientes' }, true);
+  } catch (e) {
+    pintar('<div class="aviso a-err">Sin conexión.</div><button class="b-ghost" id="bV">Volver</button>');
+    return void ($('bV').onclick = function () { pantallaInicio(); });
+  }
+  if (!r.ok) return pintar('<div class="aviso a-err">' + esc(r.error) + '</div>');
+
+  estado.libro = r.pendientes;
+
+  var porCaja = {}, orden = [];
+  r.pendientes.forEach(function (x) {
+    if (!porCaja[x.caja_id]) { porCaja[x.caja_id] = []; orden.push(x.caja_id); }
+    porCaja[x.caja_id].push(x);
+  });
+
+  pintar(
+    (r.total
+      ? '<div class="aviso ' + (r.pendientes.some(function (x) { return x.dias >= 2; }) ? 'a-err' : 'a-warn') + '">' +
+        r.total + ' renglón(es) de controlados sin registrar, en ' + r.cajas + ' cirugía(s). ' +
+        'La caja no cierra hasta que se capturen — aunque la respuesta sea que no se usaron.</div>'
+      : '<div class="aviso a-ok">El libro está al corriente.</div>') +
+
+    orden.map(function (c) {
+      var g = porCaja[c], uno = g[0];
+      return '<div class="card"><h3>' + esc(uno.paciente || c) + '</h3>' +
+        '<p class="sub mono">' + esc(c) + ' · ' + esc(uno.procedimiento || '') + ' · ' +
+        esc(uno.fecha) + (uno.dias >= 2 ? ' · hace ' + esc(uno.dias) + ' días' : '') + '</p>' +
+        '<div class="lista">' +
+        g.map(function (x, i) {
+          return '<div class="item"><div class="l">' +
+            '<div>' + esc(x.nombre || x.sku) + '</div>' +
+            '<div class="mini mono">' + esc(x.sku) +
+              (x.previsto ? ' · la plantilla preveía ' + esc(x.previsto) : '') + '</div>' +
+            '</div><button class="b-chico" data-min="' + esc(x.min_id) + '">Registrar</button></div>';
+        }).join('') +
+        '</div></div>';
+    }).join('') +
+
+    '<button class="b-ghost" id="bV">Volver</button>');
+
+  Array.prototype.forEach.call(document.querySelectorAll('[data-min]'), function (b) {
+    b.onclick = function () { pantallaMinistracion(this.getAttribute('data-min'), 'libro'); };
+  });
+  $('bV').onclick = function () { pantallaInicio(); };
+}
+
+/* Un medicamento, una captura. */
+async function pantallaMinistracion(minId, volver, cajaId) {
+  encabezado('Libro de control', minId);
+  pintar('<div class="card"><p class="sub">Cargando…</p></div>');
+
+  var m = null, lotes = [];
+  try {
+    var r = await enviar({ accion: 'ministracion_lista' }, true);
+    (r.ministraciones || []).forEach(function (x) {
+      if (String(x.min_id).toUpperCase() === String(minId).toUpperCase()) m = x;
+    });
+    if (!m) return pintar('<div class="aviso a-err">No existe ese renglón.</div>');
+    var ex = await enviar({ accion: 'existencias' }, true);
+    lotes = (ex.existencias || []).filter(function (e) {
+      return String(e.sku).toUpperCase() === String(m.sku).toUpperCase() && e.cantidad > 0;
+    });
+  } catch (e) {
+    return pintar('<div class="aviso a-err">Sin conexión. Esta captura necesita señal: ' +
+                  'descuenta del almacén contra la existencia real.</div>');
+  }
+
+  var vol = m.volumen_pieza || 0;
+
+  pintar(
+    '<div class="card"><h3>' + esc(m.nombre || m.sku) + '</h3>' +
+    '<p class="sub">' + esc(m.paciente || '') + ' · ' + esc(m.procedimiento || '') + '</p>' +
+    '<p class="mini mono">' + esc(m.caja_id) + (m.previsto ? ' · la plantilla preveía ' +
+      esc(m.previsto) + ' pieza(s)' : '') + '</p></div>' +
+
+    '<div class="card"><h3>Piezas</h3>' +
+    '<p class="mini">Esto es lo que mueve el inventario. Una ampolleta abierta se descuenta ' +
+    'completa aunque haya sobrado líquido.</p>' +
+    '<div class="campo"><label>Ampolletas o frascos que se tomaron</label>' +
+      '<input id="mTom" type="number" min="0" step="1" inputmode="numeric" value="0"></div>' +
+    '<div class="campo"><label>Que se devolvieron cerrados</label>' +
+      '<input id="mDev" type="number" min="0" step="1" inputmode="numeric" value="0"></div>' +
+    '<div class="aviso a-neutral" id="mAbre">No se abrió ninguno.</div>' +
+    '</div>' +
+
+    '<div id="mResto"></div>' +
+
+    '<button class="b-primary" id="bGuardar">Registrar en el libro</button>' +
+    '<button class="b-ghost" id="bV">Cancelar</button>');
+
+  function abiertas() {
+    return Math.max(0, (parseFloat($('mTom').value) || 0) - (parseFloat($('mDev').value) || 0));
+  }
+
+  function repintar() {
+    var a = abiertas();
+    $('mAbre').className = 'aviso ' + (a > 0 ? 'a-warn' : 'a-neutral');
+    $('mAbre').innerHTML = a > 0
+      ? 'Se abrieron <b>' + a + '</b> — eso es lo que se descuenta del almacén' +
+        (vol ? ', y entre administrado y desperdiciado tienen que dar <b>' +
+               (Math.round(a * vol * 1000) / 1000) + ' mL</b>.' : '.')
+      : 'No se abrió ninguno. Nada se descuenta.';
+
+    $('mResto').innerHTML = a > 0
+      ? '<div class="card"><h3>Lote</h3>' +
+        (lotes.length
+          ? '<div class="campo"><select id="mLote">' +
+            lotes.map(function (l) {
+              return '<option value="' + esc(l.lote_id) + '|' + esc(l.ubic_id) + '">' +
+                esc(l.lote_id) + ' · ' + esc(l.ubic_nombre || l.ubic_id) + ' · ' +
+                esc(l.cantidad) + ' pza' + (l.caducidad ? ' · cad ' + esc(l.caducidad) : '') +
+                '</option>';
+            }).join('') + '</select></div>'
+          : '<div class="aviso a-err">No hay existencia de este medicamento en ningún almacén.</div>') +
+        '</div>' +
+
+        '<div class="card"><h3>Lo que pide el libro</h3>' +
+        '<p class="mini">Los mL no mueven inventario: son lo que se asienta en el libro. ' +
+        'Se piden los dos porque lo que se abrió y no se administró no desaparece — se tira, ' +
+        'y eso también se justifica.</p>' +
+        '<div class="campo"><label>Administrado (mL)</label>' +
+          '<input id="mAdm" type="number" min="0" step="0.1" inputmode="decimal" value="0"></div>' +
+        '<div class="campo"><label>Desperdiciado (mL)</label>' +
+          '<input id="mDes" type="number" min="0" step="0.1" inputmode="decimal" value="0"></div>' +
+        '<div class="campo"><label>Quién lo administró</label>' +
+          '<input id="mQuien" placeholder="Anestesiólogo que firma la hoja"></div>' +
+        '<div class="campo"><label>Testigo del desperdicio</label>' +
+          '<input id="mTest" placeholder="Quién lo presenció"></div>' +
+        '<div class="campo"><label>Folio del libro de control</label>' +
+          '<input id="mFolio" placeholder="El renglón del libro con el que se casa"></div>' +
+        '<div class="campo"><label>Notas (opcional)</label><input id="mNota"></div>' +
+        (vol ? '' : '<p class="mini">El catálogo no sabe cuántos mL tiene una pieza de esto, ' +
+                    'así que la suma no se va a poder comprobar. Conviene capturarlo en el catálogo.</p>') +
+        '</div>'
+      : '';
+  }
+
+  $('mTom').oninput = repintar;
+  $('mDev').oninput = repintar;
+  repintar();
+
+  function volverA() {
+    if (volver === 'caja' && cajaId) pantallaCajaDetalle(cajaId);
+    else pantallaLibro();
+  }
+
+  $('bGuardar').onclick = async function () {
+    var a = abiertas();
+    if ((parseFloat($('mDev').value) || 0) > (parseFloat($('mTom').value) || 0)) {
+      return alertar('No se pueden devolver más piezas de las que se tomaron.');
+    }
+    var d = { accion: 'ministracion_guardar', min_id: minId,
+              tomadas: parseFloat($('mTom').value) || 0,
+              devueltas: parseFloat($('mDev').value) || 0 };
+    if (a > 0) {
+      if (!$('mLote')) return alertar('No hay existencia de este medicamento para descontar.');
+      var par = String($('mLote').value).split('|');
+      d.lote_id = par[0]; d.ubic_origen = par[1];
+      d.administrado = parseFloat($('mAdm').value) || 0;
+      d.desperdiciado = parseFloat($('mDes').value) || 0;
+      d.administro = $('mQuien').value.trim();
+      d.testigo = $('mTest').value.trim();
+      d.folio_libro = $('mFolio').value.trim();
+      d.notas = $('mNota').value.trim();
+    }
+    this.disabled = true; this.textContent = 'Registrando…';
+    try {
+      var r = await enviar(d, true);
+      if (!r.ok) {
+        this.disabled = false; this.textContent = 'Registrar en el libro';
+        return alertar(r.error);
+      }
+      if (r.aviso) alertar(r.aviso);
+      volverA();
+    } catch (e) {
+      this.disabled = false; this.textContent = 'Registrar en el libro';
+      alertar('Sin conexión. Esta captura necesita señal porque valida contra la existencia real.');
+    }
+  };
+  $('bV').onclick = volverA;
+}
+
 async function pantallaCajaDetalle(cajaId) {
   encabezado('Caja', cajaId);
   pintar('<div class="card"><p class="sub">Cargando…</p></div>');
@@ -2488,6 +2743,8 @@ async function pantallaCajaDetalle(cajaId) {
         '</div>' +
         '<button class="b-dark" id="bCerrar"' + (dentro.length ? '' : ' disabled') + '>Cerrar la caja y hacer el corte</button>') +
 
+    bloqueControlados(r.controlados || [], cerrada) +
+
     '<div class="card"><h3>Contenido</h3>' +
     (r.lineas.length
       ? '<p class="mini">La cifra de en medio es lo que la caja trae encima ahora. Al cerrar, eso es el consumo.' +
@@ -2500,13 +2757,20 @@ async function pantallaCajaDetalle(cajaId) {
     '<button class="b-ghost" id="bEtq">Imprimir etiqueta de la caja</button>' +
     '<button class="b-ghost" id="bV">Volver a las cajas</button>');
 
+  Array.prototype.forEach.call(document.querySelectorAll('[data-min]'), function (b) {
+    b.onclick = function () {
+      pantallaMinistracion(this.getAttribute('data-min'), 'caja', cajaId);
+    };
+  });
+
   /* Las tres hojas salen con los folios de lote ya impresos. Esa es toda la
      diferencia con el formato en blanco: al cerrar, en vez de transcribir
      veintitantos folios a mano —que es donde se va el tiempo y donde se
      cometen los errores— sólo se escribe lo que regresa. */
   $('bHojas').onclick = function () {
     try {
-      escribir(HOJAS_KEY, { caja: k, lineas: r.lineas || [] });
+      escribir(HOJAS_KEY, { caja: k, lineas: r.lineas || [],
+                            controlados: r.controlados || [] });
       location.href = 'hojas_caja.html';
     } catch (e) {
       alertar('No se pudieron preparar las hojas. Intenta de nuevo.');
