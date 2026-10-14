@@ -148,6 +148,12 @@ try {
   if (crudo) datos = JSON.parse(crudo);
 } catch (e) { datos = null; }
 
+/* Los controlados NO estan en la caja: viajan aparte, contra el libro de
+   control. Se imprimen de todos modos porque quien surte tiene que saber que
+   existen y que le faltan — un renglon que no aparece en ningun papel es un
+   renglon que nadie cuenta. */
+var CONTROLADOS = (datos && datos.controlados) || [];
+
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
     return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
@@ -207,6 +213,38 @@ var NOMBRE_GRUPO = {
 };
 function nombreGrupo(g) { return NOMBRE_GRUPO[g] || g; }
 
+function tablaControlados(lista) {
+  if (!lista.length) return '';
+  return '<div class="nota ojo" style="margin-bottom:6px">Estos NO van dentro de la caja. ' +
+    'Se surten contra receta, pieza por pieza, y se anotan aqui para capturarlos en el libro.</div>' +
+    '<table><thead><tr>' +
+    '<th class="c-nom">Controlado</th>' +
+    '<th class="c-n">Previsto</th>' +
+    '<th class="c-n">Tomo</th>' +
+    '<th class="c-n">Devolvio</th>' +
+    '<th class="c-n">Administro</th>' +
+    '<th class="c-n">Tiro</th>' +
+    '<th class="c-lote">Folio del libro</th>' +
+    '<th class="c-cad">Testigo</th>' +
+    '</tr></thead><tbody>' +
+    lista.map(function (x) {
+      return '<tr>' +
+        '<td class="c-nom">' + esc(x.nombre || x.sku) + '</td>' +
+        '<td class="num c-n">' + esc(x.previsto || '') + '</td>' +
+        '<td class="esc c-n">&nbsp;</td>' +
+        '<td class="esc c-n">&nbsp;</td>' +
+        '<td class="esc c-n">&nbsp;</td>' +
+        '<td class="esc c-n">&nbsp;</td>' +
+        '<td class="esc c-lote">&nbsp;</td>' +
+        '<td class="esc c-cad">&nbsp;</td>' +
+        '</tr>';
+    }).join('') +
+    '</tbody></table>' +
+    '<div class="nota">Piezas en las cuatro primeras columnas; <b>mL</b> en administro y tiro. ' +
+    'Lo que se abrio y no se administro no desaparece: se tira, va con testigo, y es lo que el ' +
+    'libro tiene que justificar.</div>';
+}
+
 /* ---------- hoja 1: surtido y retorno ---------- */
 function hojaSurtido(c, lineas) {
   var cuerpo = agrupar(lineas).map(function (gr) {
@@ -241,8 +279,7 @@ function hojaSurtido(c, lineas) {
     '<div class="nota">Se anota el <b>consumo</b>; lo que regresa es la comprobacion. ' +
     'El sistema calcula igual: <b>Salió &minus; Regresa = Consumo</b>, y si las dos columnas ' +
     'no cuadran con lo que salió, gana lo que se contó de regreso.</div>' +
-    '<div class="nota ojo">Los medicamentos controlados no van en la caja. Se surten contra receta, ' +
-    'pieza por pieza, con devolución de ampolleta.</div>' +
+    tablaControlados(CONTROLADOS) +
     '</div>';
 }
 
