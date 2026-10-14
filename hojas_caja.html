@@ -188,11 +188,13 @@ function ficha(c, extra) {
 function agrupar(lineas) {
   var orden = [], grupos = {};
   lineas.forEach(function (l) {
-    var g = (String(l.sku).split('-')[0] || 'OTR').toUpperCase();
+    var g = String(l.grupo || (String(l.sku).split('-')[0] || 'OTR')).toUpperCase();
     if (!grupos[g]) { grupos[g] = []; orden.push(g); }
     grupos[g].push(l);
   });
-  orden.sort();
+  /* NO se reordena aqui: el servidor ya manda las lineas agrupadas y en
+     orden. Si esta pagina ordenara por su cuenta, la hoja impresa y la
+     pantalla de la caja volverian a no coincidir. */
   return orden.map(function (g) { return { clave: g, lineas: grupos[g] }; });
 }
 
@@ -232,12 +234,13 @@ function hojaSurtido(c, lineas) {
     '<th class="c-lote">Folio de lote</th>' +
     '<th class="c-cad">Caducidad</th>' +
     '<th class="c-n">Salió</th>' +
-    '<th class="c-n">Regresa</th>' +
     '<th class="c-n">Consumo</th>' +
+    '<th class="c-n">Regresa</th>' +
     '<th class="c-obs">Observaciones</th>' +
     '</tr></thead><tbody>' + cuerpo + '</tbody></table>' +
-    '<div class="nota">El consumo no se captura: se calcula. <b>Salió &minus; Regresa = Consumo.</b> ' +
-    'La columna de consumo es para el cotejo a mano; el sistema la saca sola al cerrar.</div>' +
+    '<div class="nota">Se anota el <b>consumo</b>; lo que regresa es la comprobacion. ' +
+    'El sistema calcula igual: <b>Salió &minus; Regresa = Consumo</b>, y si las dos columnas ' +
+    'no cuadran con lo que salió, gana lo que se contó de regreso.</div>' +
     '<div class="nota ojo">Los medicamentos controlados no van en la caja. Se surten contra receta, ' +
     'pieza por pieza, con devolución de ampolleta.</div>' +
     '</div>';
