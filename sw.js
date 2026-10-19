@@ -1,12 +1,16 @@
 /* Service worker — cachea el armazón de la app para que abra sin señal.
    Los datos NUNCA se cachean: siempre van al gateway o a la cola local. */
 
-var CACHE = 'msu-almacen-v31';
+var CACHE = 'msu-almacen-v32';
 var FAMILIA = 'msu-almacen-';
 var ARCHIVOS = ['./', './index.html', './manifest.json'];
 /* Imprimir etiquetas y hojas de caja tiene que servir sin señal: se hace en
    el almacén al surtir, que es justo donde la señal es peor. */
 var OPCIONALES = ['./etiquetas.html', './qrcode.js', './hojas_caja.html'];
+
+/* Lo que cambia en cada despliegue y por lo tanto no puede quedarse viejo:
+   la pantalla y los scripts. Las imagenes y el manifest no van aqui. */
+var ESCUDO = /(\/|\.html|\.js)$/i;
 
 self.addEventListener('install', function (e) {
   e.waitUntil(
@@ -43,7 +47,15 @@ self.addEventListener('fetch', function (e) {
   }
 
   e.respondWith(
-    fetch(e.request)
+    /* El HTML y los scripts se piden SIEMPRE al servidor. GitHub Pages los
+       manda con max-age=600, asi que sin esto el navegador reusa su propia
+       copia hasta diez minutos y un arreglo recien subido no aparece aunque
+       la app ya se haya cerrado y vuelto a abrir. Con no-cache pregunta y
+       casi siempre le contestan 304, que no pesa nada. Sin senal se sigue
+       cayendo al cache de abajo, igual que antes. */
+    (ESCUDO.test(url.pathname) || e.request.mode === 'navigate'
+      ? fetch(url.href, { cache: 'no-cache', credentials: 'same-origin' })
+      : fetch(e.request))
       .then(function (res) {
         if (res && res.status === 200 && url.origin === self.location.origin) {
           var copia = res.clone();
