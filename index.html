@@ -4197,7 +4197,13 @@ function pantallaSkuFicha(sku, volver) {
     (art.presentacion ? '<div class="item"><div class="l"><div>Presentación</div></div><span>' + esc(art.presentacion) + '</span></div>' : '') +
     '<div class="item"><div class="l"><div>Se descuenta en</div></div><span>' + esc(art.unidad_base || '—') + '</span></div>' +
     (String(art.controlado).toUpperCase() === 'SI'
-      ? '<div class="item"><div class="l"><div>Controlado</div></div><span class="pill p-warn">Bajo llave y libro de control</span></div>' : '') +
+      ? '<div class="item"><div class="l"><div>Controlado</div></div>' +
+        '<span class="pill p-warn">Bajo llave y registro</span></div>' +
+        '<div class="item"><div class="l"><div>mL por pieza</div></div>' +
+        (art.volumen_pieza
+          ? '<span class="mono">' + esc(art.volumen_pieza) + ' mL</span>'
+          : '<span class="pill p-warn">falta capturarlo</span>') + '</div>'
+      : '') +
     '</div>' +
     '<div class="espacio"></div>' +
     '<button class="b-ghost" id="bSusLotes">Ver sus lotes y caducidades</button>' +
@@ -4220,7 +4226,15 @@ function pantallaSkuFicha(sku, volver) {
     '</div>' +
     '<div class="campo"><label>¿Se cobra aparte?</label><select id="eFact">' +
       opt(['PAQUETE','SIEMPRE','NUNCA'], art.facturable) + '</select></div>' +
-    '<p class="mini" id="eNota">N1 se cuenta pieza por pieza · N2 por lote · N3 por consumo. Un controlado que no es multidosis va en N1: el libro de control pide una línea por ampolleta.</p>' +
+    /* Sólo para controlados: en una gasa "mL por pieza" no quiere decir nada.
+       Se muestra y se esconde solo al cambiar la bandera de controlado. */
+    '<div class="campo" id="eVolCampo"><label>mL por ampolleta o frasco</label>' +
+      '<input id="eVol" type="number" min="0" step="0.1" inputmode="decimal" value="' +
+      esc(art.volumen_pieza || '') + '" placeholder="Lo dice el empaque">' +
+      '<p class="mini">De aquí sale la comprobación del registro de controlados: ' +
+      'lo administrado más lo desperdiciado tiene que dar el volumen de lo que se abrió. ' +
+      'Si se deja vacío, el registro guarda igual pero no comprueba.</p></div>' +
+    '<p class="mini" id="eNota">N1 se cuenta pieza por pieza · N2 por lote · N3 por consumo. Un controlado que no es multidosis va en N1: el registro pide una línea por ampolleta.</p>' +
     '<button class="b-primary" id="eGuardar">Guardar clasificación</button>' +
     '</div>' +
 
@@ -4294,8 +4308,15 @@ function pantallaSkuFicha(sku, volver) {
       nota.textContent = 'N1 se cuenta pieza por pieza · N2 por lote · N3 por consumo.';
     }
   }
-  ['eCtrl','eMulti','eClase','eNiv'].forEach(function (id) { $(id).onchange = proponerNivel; });
+  function mostrarVolumen() {
+    var campo = $('eVolCampo');
+    if (campo) campo.hidden = $('eCtrl').value.toUpperCase() !== 'SI';
+  }
+  ['eCtrl','eMulti','eClase','eNiv'].forEach(function (id) {
+    $(id).onchange = function () { proponerNivel(); mostrarVolumen(); };
+  });
   proponerNivel();
+  mostrarVolumen();
 
   $('eGuardar').onclick = async function () {
     var cambios = {
@@ -4305,6 +4326,11 @@ function pantallaSkuFicha(sku, volver) {
       clase_abc:     $('eClase').value,
       facturable:    $('eFact').value
     };
+    /* Sólo se manda si el insumo es controlado: si no, el campo ni se ve y
+       mandarlo vacío borraría un dato que alguien capturó antes. */
+    if ($('eCtrl').value.toUpperCase() === 'SI') {
+      cambios.volumen_pieza = $('eVol').value.trim();
+    }
     this.disabled = true; this.textContent = 'Guardando…';
     try {
       var r = await enviar({ accion: 'sku_editar', sku: art.sku, cambios: cambios }, true);
