@@ -194,6 +194,16 @@ button:disabled{opacity:.5}
 button+button{margin-top:9px}
 .b-fila button+button{margin-top:0}
 
+.folio-min{
+  display:flex;align-items:baseline;justify-content:space-between;gap:10px;
+  border:1px solid var(--accent);border-radius:8px;padding:9px 12px;margin:12px 0 8px;
+  background:var(--tint-accent);
+}
+.folio-min .k{
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:10px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--accent-deep);
+}
+.folio-min .v{font-size:1.05rem;color:var(--ink);font-weight:500}
 .masmenos{display:flex;align-items:center;gap:6px;flex-shrink:0}
 .masmenos .uno{
   width:30px;height:30px;border-radius:7px;border:1px solid var(--rule);
@@ -2492,7 +2502,7 @@ function bloqueControlados(lista, cerrada) {
 
   return '<div class="card"><h3>Controlados</h3>' +
     '<p class="mini">No van dentro de la caja: se surten contra receta, pieza por pieza, ' +
-    'y se registran en el libro de control.' +
+    'y se registran uno por uno, con su folio.' +
     (falta && !cerrada ? ' La caja no cierra hasta que estén los ' + falta + ' renglones.' : '') +
     '</p>' +
     '<div class="lista">' +
@@ -2596,7 +2606,11 @@ async function pantallaMinistracion(minId, volver, cajaId) {
     '<div class="card"><h3>' + esc(m.nombre || m.sku) + '</h3>' +
     '<p class="sub">' + esc(m.paciente || '') + ' · ' + esc(m.procedimiento || '') + '</p>' +
     '<p class="mini mono">' + esc(m.caja_id) + (m.previsto ? ' · la plantilla preveía ' +
-      esc(m.previsto) + ' pieza(s)' : '') + '</p></div>' +
+      esc(m.previsto) + ' pieza(s)' : '') + '</p>' +
+    '<div class="folio-min"><span class="k">Folio de este registro</span>' +
+      '<span class="v mono">' + esc(m.min_id) + '</span></div>' +
+    '<p class="mini">Este folio es el del registro, y lo emite el sistema. Se copia tal cual ' +
+    'en el registro interno de controlados — no hay que inventar ninguno.</p></div>' +
 
     '<div class="card"><h3>Piezas</h3>' +
     '<p class="mini">Esto es lo que mueve el inventario. Una ampolleta abierta se descuenta ' +
@@ -2639,8 +2653,8 @@ async function pantallaMinistracion(minId, volver, cajaId) {
           : '<div class="aviso a-err">No hay existencia de este medicamento en ningún almacén.</div>') +
         '</div>' +
 
-        '<div class="card"><h3>Lo que pide el libro</h3>' +
-        '<p class="mini">Los mL no mueven inventario: son lo que se asienta en el libro. ' +
+        '<div class="card"><h3>Lo que se asienta</h3>' +
+        '<p class="mini">Los mL no mueven inventario: son lo que se asienta en el registro. ' +
         'Se piden los dos porque lo que se abrió y no se administró no desaparece — se tira, ' +
         'y eso también se justifica.</p>' +
         '<div class="campo"><label>Administrado (mL)</label>' +
@@ -2651,8 +2665,8 @@ async function pantallaMinistracion(minId, volver, cajaId) {
           '<input id="mQuien" placeholder="Anestesiólogo que firma la hoja"></div>' +
         '<div class="campo"><label>Testigo del desperdicio</label>' +
           '<input id="mTest" placeholder="Quién lo presenció"></div>' +
-        '<div class="campo"><label>Folio del libro de control</label>' +
-          '<input id="mFolio" placeholder="El renglón del libro con el que se casa"></div>' +
+        '<div class="campo"><label>Folio del libro oficial (si lo hay)</label>' +
+          '<input id="mFolio" placeholder="Se deja vacío mientras no haya libro"></div>' +
         '<div class="campo"><label>Notas (opcional)</label><input id="mNota"></div>' +
         (vol ? '' : '<p class="mini">El catálogo no sabe cuántos mL tiene una pieza de esto, ' +
                     'así que la suma no se va a poder comprobar. Conviene capturarlo en el catálogo.</p>') +
