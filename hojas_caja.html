@@ -215,8 +215,9 @@ function nombreGrupo(g) { return NOMBRE_GRUPO[g] || g; }
 
 function tablaControlados(lista) {
   if (!lista.length) return '';
-  return '<div class="nota ojo" style="margin-bottom:6px">Estos NO van dentro de la caja. ' +
-    'Se surten contra receta, pieza por pieza, y se anotan aqui para capturarlos en el libro.</div>' +
+  return '<div class="nota ojo" style="margin-bottom:6px">Registro interno de medicamentos ' +
+    'controlados. Estos NO van dentro de la caja: se surten contra receta, pieza por pieza. ' +
+    'El folio de cada renglon ya viene impreso — es el que emitio el sistema.</div>' +
     '<table><thead><tr>' +
     '<th class="c-nom">Controlado</th>' +
     '<th class="c-n">Previsto</th>' +
@@ -224,7 +225,7 @@ function tablaControlados(lista) {
     '<th class="c-n">Devolvio</th>' +
     '<th class="c-n">Administro</th>' +
     '<th class="c-n">Tiro</th>' +
-    '<th class="c-lote">Folio del libro</th>' +
+    '<th class="c-lote">Folio del registro</th>' +
     '<th class="c-cad">Testigo</th>' +
     '</tr></thead><tbody>' +
     lista.map(function (x) {
@@ -235,14 +236,14 @@ function tablaControlados(lista) {
         '<td class="esc c-n">&nbsp;</td>' +
         '<td class="esc c-n">&nbsp;</td>' +
         '<td class="esc c-n">&nbsp;</td>' +
-        '<td class="esc c-lote">&nbsp;</td>' +
+        '<td class="mono c-lote">' + esc(x.min_id || '') + '</td>' +
         '<td class="esc c-cad">&nbsp;</td>' +
         '</tr>';
     }).join('') +
     '</tbody></table>' +
     '<div class="nota">Piezas en las cuatro primeras columnas; <b>mL</b> en administro y tiro. ' +
-    'Lo que se abrio y no se administro no desaparece: se tira, va con testigo, y es lo que el ' +
-    'libro tiene que justificar.</div>';
+    'Lo que se abrio y no se administro no desaparece: se tira, va con testigo, y es lo que hay ' +
+    'que justificar. Esta hoja, firmada, es el respaldo en papel de los folios de arriba.</div>';
 }
 
 /* ---------- hoja 1: surtido y retorno ---------- */
