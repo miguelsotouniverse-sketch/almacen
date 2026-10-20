@@ -721,8 +721,9 @@ function pantallaInicio() {
     '<button class="baldosa" id="bExist">Existencias<span class="q">Qué hay y dónde</span></button>' +
     '<button class="baldosa" id="bCajas">Cajas de cirugía<span class="q">Abrir, surtir, cerrar</span></button>' +
     '<button class="baldosa" id="bArmar">¿Se puede armar?<span class="q">Plantilla contra existencia</span></button>' +
-    '<button class="baldosa" id="bCompra">Lista de compra<span class="q">Qué pedir</span></button>' +
-    '<button class="baldosa" id="bDot">Carros y cajas selladas<span class="q">Urgencias</span></button>' +
+    (alcanceLimitado() ? '' :
+      '<button class="baldosa" id="bCompra">Lista de compra<span class="q">Qué pedir</span></button>' +
+      '<button class="baldosa" id="bDot">Carros y cajas selladas<span class="q">Urgencias</span></button>') +
     '<button class="baldosa" id="bLibro">Libro de controlados<span class="q">Lo que falta registrar</span></button>' +
     '<button class="baldosa" id="bAgenda">Agenda<span class="q">Armar desde el caso programado</span></button>' +
     '<button class="baldosa" id="bCatalogo">Catálogo<span class="q">Qué es cada insumo</span></button>' +
@@ -770,8 +771,8 @@ function pantallaInicio() {
   $('bExist').onclick = function () { pantallaExistencias(''); };
   $('bCajas').onclick = function () { pantallaCajas(); };
   $('bArmar').onclick = function () { pantallaSurtido(); };
-  $('bCompra').onclick = function () { pantallaCompra(); };
-  $('bDot').onclick = function () { pantallaDotaciones(); };
+  if ($('bCompra')) $('bCompra').onclick = function () { pantallaCompra(); };
+  if ($('bDot')) $('bDot').onclick = function () { pantallaDotaciones(); };
   $('bLibro').onclick = function () { pantallaLibro(); };
   $('bAgenda').onclick = function () { pantallaAgenda(); };
   $('bCatalogo').onclick = function () { pantallaCatalogo(''); };
@@ -1710,6 +1711,13 @@ async function pantallaDotacionEditar(ubic) {
 /* =================================================================
    Usuarios y ubicaciones
    ================================================================= */
+
+/* Quien tiene alcance a un solo almacén no ve los mosaicos que son de toda
+   la unidad. No es cosmética: un botón que siempre contesta "eso no es suyo"
+   enseña a ignorar los avisos. */
+function alcanceLimitado() {
+  return (((estado.cat && estado.cat.alcance) || []).length > 0);
+}
 
 /* La clave de un almacén no le dice nada a nadie: se enseña su nombre. */
 function nombreAlmacen(id) {
