@@ -724,9 +724,12 @@ function pantallaInicio() {
     (alcanceLimitado() ? '' :
       '<button class="baldosa" id="bCompra">Lista de compra<span class="q">Qué pedir</span></button>' +
       '<button class="baldosa" id="bDot">Carros y cajas selladas<span class="q">Urgencias</span></button>') +
-    '<button class="baldosa" id="bLibro">Libro de controlados<span class="q">Lo que falta registrar</span></button>' +
+    (puedeControlados()
+      ? '<button class="baldosa" id="bLibro">Libro de controlados<span class="q">Lo que falta registrar</span></button>'
+      : '') +
     '<button class="baldosa" id="bAgenda">Agenda<span class="q">Armar desde el caso programado</span></button>' +
-    '<button class="baldosa" id="bCatalogo">Catálogo<span class="q">Qué es cada insumo</span></button>' +
+    (alcanceLimitado() ? '' :
+      '<button class="baldosa" id="bCatalogo">Catálogo<span class="q">Qué es cada insumo</span></button>') +
     (['DIRECTOR','GERENCIA'].indexOf(String(estado.sesion && estado.sesion.rol).toUpperCase()) >= 0
       ? '<button class="baldosa ancha" id="bRevis">Por revisar' +
         '<span class="q">Consumo real contra lo que pedía la plantilla</span></button>' : '') +
@@ -773,9 +776,9 @@ function pantallaInicio() {
   $('bArmar').onclick = function () { pantallaSurtido(); };
   if ($('bCompra')) $('bCompra').onclick = function () { pantallaCompra(); };
   if ($('bDot')) $('bDot').onclick = function () { pantallaDotaciones(); };
-  $('bLibro').onclick = function () { pantallaLibro(); };
+  if ($('bLibro')) $('bLibro').onclick = function () { pantallaLibro(); };
   $('bAgenda').onclick = function () { pantallaAgenda(); };
-  $('bCatalogo').onclick = function () { pantallaCatalogo(''); };
+  if ($('bCatalogo')) $('bCatalogo').onclick = function () { pantallaCatalogo(''); };
   $('bPlant').onclick = function () { pantallaPlantillas(); };
   $('bLotes').onclick = function () { pantallaLotes(); };
   $('bSinFecha').onclick = function () { pantallaSinFecha(); };
@@ -1715,6 +1718,12 @@ async function pantallaDotacionEditar(ubic) {
 /* Quien tiene alcance a un solo almacén no ve los mosaicos que son de toda
    la unidad. No es cosmética: un botón que siempre contesta "eso no es suyo"
    enseña a ignorar los avisos. */
+/* Registrar una ministración de controlados es de regulatorio. Quien no lo
+   es ve lo que falta, pero no lo captura. */
+function puedeControlados() {
+  return !!(estado.cat && estado.cat.puede_controlados);
+}
+
 function alcanceLimitado() {
   return (((estado.cat && estado.cat.alcance) || []).length > 0);
 }
@@ -2535,6 +2544,8 @@ function bloqueControlados(lista, cerrada) {
     '<p class="mini">No van dentro de la caja: se surten contra receta, pieza por pieza, ' +
     'y se registran uno por uno, con su folio.' +
     (falta && !cerrada ? ' La caja no cierra hasta que estén los ' + falta + ' renglones.' : '') +
+    (falta && !cerrada && !puedeControlados()
+      ? ' Los registra quien lleva regulatorio, no quien surte la caja.' : '') +
     '</p>' +
     '<div class="lista">' +
     lista.map(function (x) {
@@ -2550,7 +2561,7 @@ function bloqueControlados(lista, cerrada) {
         '</div></div>' +
         (ok
           ? '<span class="pill p-ok">en el libro</span>'
-          : (cerrada
+          : (cerrada || !puedeControlados()
               ? '<span class="pill p-warn">sin registrar</span>'
               : '<button class="b-chico" data-min="' + esc(x.min_id) + '">Registrar</button>')) +
         '</div>';
