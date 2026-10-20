@@ -1711,6 +1711,18 @@ async function pantallaDotacionEditar(ubic) {
    Usuarios y ubicaciones
    ================================================================= */
 
+/* La clave de un almacén no le dice nada a nadie: se enseña su nombre. */
+function nombreAlmacen(id) {
+  var claves = String(id || '').split(/[,;]/).map(function (x) { return x.trim().toUpperCase(); });
+  var lista = (estado.cat && estado.cat.almacenes) || [];
+  return claves.filter(function (x) { return !!x; }).map(function (x) {
+    for (var i = 0; i < lista.length; i++) {
+      if (String(lista[i].id).toUpperCase() === x) return lista[i].nombre;
+    }
+    return x;
+  }).join(' y ');
+}
+
 async function pantallaUsuarios() {
   encabezado('Usuarios', 'Quién entra y con qué rol');
   pintar('<div class="card"><p class="sub">Cargando…</p></div>');
@@ -1725,8 +1737,10 @@ async function pantallaUsuarios() {
       '<div class="card"><h3>' + r.usuarios.length + ' usuario(s)</h3><div class="lista">' +
       r.usuarios.map(function (u) {
         var baja = String(u.activo).toUpperCase() === 'NO';
+        var alc = String(u.almacenes || '').trim();
         return '<div class="item"><div class="l"><span>' + esc(u.correo) + '</span>' +
-          '<div>' + esc(u.nombre || u.usuario) + '</div></div>' +
+          '<div>' + esc(u.nombre || u.usuario) +
+          (alc ? ' · sólo ' + esc(nombreAlmacen(alc)) : '') + '</div></div>' +
           '<span class="pill ' + (baja ? 'p-neutral' : 'p-ok') + '">' +
           esc(baja ? 'baja' : u.rol) + '</span></div>';
       }).join('') + '</div></div>' +
@@ -1736,6 +1750,14 @@ async function pantallaUsuarios() {
       '<div class="campo"><label>Nombre</label><input id="uNombre"></div>' +
       '<div class="campo"><label>Rol</label><select id="uRol">' +
       roles.map(function (x) { return '<option>' + x + '</option>'; }).join('') + '</select></div>' +
+      '<div class="campo"><label>¿A qué almacén llega?</label>' +
+      '<select id="uAlmacenes"><option value="">A todos</option>' +
+      ((estado.cat && estado.cat.almacenes) || []).map(function (a) {
+        return '<option value="' + esc(a.id) + '">Sólo ' + esc(a.nombre) + '</option>';
+      }).join('') + '</select>' +
+      '<p class="mini">Limitarlo a un almacén es para quien trabaja sólo ahí: no puede recibir, ' +
+      'contar ni dar de baja en los otros, ni los ve en existencias. Las cajas quirúrgicas quedan ' +
+      'fuera de esa línea, porque una caja se surte de los tres almacenes a la vez.</p></div>' +
       '<button class="b-dark" id="bAlta">Dar de alta</button>' +
       '<p class="mini">Entra con Google, sin contraseña. Si el correo ya existe, se avisa en vez de pisarlo: ' +
       'cambiarle el rol a alguien sin querer es como quitarle o darle permisos a ciegas.</p></div>' +
@@ -1750,7 +1772,8 @@ async function pantallaUsuarios() {
       if (!nombre) return alertar('Falta el nombre.');
       this.disabled = true;
       var res = await enviar({ accion: 'usuario_alta',
-        usuario_nuevo: { correo: correo, nombre: nombre, rol: $('uRol').value } }, true);
+        usuario_nuevo: { correo: correo, nombre: nombre, rol: $('uRol').value,
+                         almacenes: $('uAlmacenes').value } }, true);
       if (!res.ok) { alertar(res.error); this.disabled = false; return; }
       pantallaUsuarios();
     };
