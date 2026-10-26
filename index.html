@@ -752,6 +752,10 @@ function pantallaInicio() {
     '<button class="baldosa" id="bLotes">Lotes y bajas</button>' +
     '<button class="baldosa" id="bSinFecha">Folios sin caducidad</button>' +
     '<button class="baldosa" id="bActivos">Activos fijos</button>' +
+    (puedeVerCostos()
+      ? '<button class="baldosa" id="bCostos">Qué costó cada cirugía<span class="q">Costo directo de material</span></button>' +
+        '<button class="baldosa" id="bCostear">Lotes por costear<span class="q">Los que entraron sin precio</span></button>'
+      : '') +
     (esDir ? '<button class="baldosa" id="bUsuarios">Usuarios y ubicaciones</button>' +
              '<button class="baldosa" id="bAnular">Anular recepción</button>' +
              '<button class="baldosa" id="bFolios">Homologar folios</button>' +
@@ -784,6 +788,8 @@ function pantallaInicio() {
   $('bSinFecha').onclick = function () { pantallaSinFecha(); };
   $('bActivos').onclick = function () { location.href = '/activos/'; };
   if ($('bRevis')) $('bRevis').onclick = function () { pantallaRevisiones(); };
+  if ($('bCostos')) $('bCostos').onclick = function () { pantallaCostos(); };
+  if ($('bCostear')) $('bCostear').onclick = function () { pantallaPorCostear(); };
   if ($('bUsuarios')) $('bUsuarios').onclick = function () { pantallaUsuarios(); };
   if ($('bAnular')) $('bAnular').onclick = function () { pantallaAnularRecepcion(); };
   if ($('bFolios')) $('bFolios').onclick = function () { pantallaHomologarFolios(); };
@@ -1718,6 +1724,28 @@ async function pantallaDotacionEditar(ubic) {
 /* Quien tiene alcance a un solo almacén no ve los mosaicos que son de toda
    la unidad. No es cosmética: un botón que siempre contesta "eso no es suyo"
    enseña a ignorar los avisos. */
+/* El costo es información de margen: la ve quien dirige, no quien surte. */
+function puedeVerCostos() {
+  var r = String(estado.sesion && estado.sesion.rol).toUpperCase();
+  return r === 'DIRECTOR' || r === 'GERENCIA';
+}
+
+/* Pesos con separador de miles. Un costo sin formato se lee mal y se teclea
+   peor cuando alguien lo copia a otro lado. */
+function pesos(n) {
+  if (n === null || n === undefined || n === '') return '—';
+  var v = Number(n);
+  if (isNaN(v)) return '—';
+  return '$' + v.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+/* La cobertura decide de qué color se lee el número: completo, a medias, o
+   tan incompleto que no es un costo sino una pista. */
+function pillCobertura(pct) {
+  var clase = pct === 100 ? 'p-ok' : (pct >= 70 ? 'p-warn' : 'p-crit');
+  return '<span class="pill ' + clase + '">' + pct + '% costeado</span>';
+}
+
 /* Registrar una ministración de controlados es de regulatorio. Quien no lo
    es ve lo que falta, pero no lo captura. */
 function puedeControlados() {
@@ -1738,6 +1766,205 @@ function nombreAlmacen(id) {
     }
     return x;
   }).join(' y ');
+}
+
+/* =================================================================
+   Qué costó cada cirugía
+
+   El costo se calcula contra el lote del que salió cada pieza, cada vez que
+   se abre la pantalla. Por eso un lote que se costea hoy corrige las
+   cirugías de la semana pasada sin que nadie las vuelva a tocar.
+   ================================================================= */
+
+async function pantallaCostos() {
+  encabezado('Qué costó cada cirugía', 'Costo directo de material');
+  pintar('<div class="card"><p class="sub">Calculando…</p></div>');
+  try {
+    var r = await enviar({ accion: 'costos' }, true);
+    if (!r.ok) return pintar('<div class="aviso a-err">' + esc(r.error) + '</div>' +
+      '<button class="b-ghost" onclick="pantallaInicio()">Volver</button>');
+
+    var sinCosto = r.lotes_sin_costo || 0;
+
+    pintar(
+      (sinCosto
+        ? '<div class="aviso a-warn"><b>' + sinCosto + ' lote(s) sin precio.</b> ' +
+          'Todo lo que salió de ellos cuenta como cero, así que los totales de abajo ' +
+          'son pisos, no costos. <button class="b-chico" id="bIrCostear">Costearlos</button></div>'
+        : '') +
+
+      '<div class="card"><h3>Por procedimiento</h3>' +
+      (r.resumen.length
+        ? '<div class="lista">' + r.resumen.map(function (g) {
+            return '<div class="item"><div class="l">' +
+              '<div>' + esc(g.procedimiento) + '</div>' +
+              '<div class="mini">' + g.cirugias + ' cirugía(s) · ' +
+                (g.promedio !== null
+                  ? 'promedio ' + pesos(g.promedio) +
+                    (g.completas > 1 ? ' · de ' + pesos(g.minimo) + ' a ' + pesos(g.maximo) : '') +
+                    ' <span class="mini">(sobre ' + g.completas + ' completa(s))</span>'
+                  : '<b>sin ninguna cirugía costeada al 100 %</b>') +
+              '</div></div>' +
+              pillCobertura(g.cobertura) + '</div>';
+          }).join('') + '</div>'
+        : '<p class="mini">Todavía no hay cirugías cerradas con consumo.</p>') +
+      '</div>' +
+
+      '<div class="card"><h3>Cirugía por cirugía</h3>' +
+      '<div class="lista">' + r.cirugias.map(function (c) {
+        return '<div class="item"><div class="l">' +
+          '<div>' + esc(c.procedimiento) + '</div>' +
+          '<div class="mini mono">' + esc(c.caja_id) +
+            (c.cerrada_en ? ' · ' + esc(String(c.cerrada_en).slice(0, 10)) : '') +
+            ' · ' + c.renglones + ' renglón(es)</div></div>' +
+          '<button class="b-chico" data-caja="' + esc(c.caja_id) + '">' +
+            pesos(c.costo_real) + '</button></div>';
+      }).join('') + '</div>' +
+      '<p class="mini">El costo real manda; el fiscal se ve al abrir cada cirugía. ' +
+      'Esto es material de almacén: no incluye implantes, quirófano ni personal.</p></div>' +
+
+      '<button class="b-ghost" id="bV">Volver</button>');
+
+    if ($('bIrCostear')) $('bIrCostear').onclick = function () { pantallaPorCostear(); };
+    Array.prototype.forEach.call(document.querySelectorAll('[data-caja]'), function (b) {
+      b.onclick = function () { pantallaCostoCaja(this.getAttribute('data-caja')); };
+    });
+    $('bV').onclick = function () { pantallaInicio(); };
+  } catch (e) {
+    pintar('<div class="aviso a-err">Sin conexión.</div>' +
+           '<button class="b-ghost" onclick="pantallaInicio()">Volver</button>');
+  }
+}
+
+async function pantallaCostoCaja(cajaId) {
+  encabezado(cajaId, 'Lo que consumió');
+  pintar('<div class="card"><p class="sub">Calculando…</p></div>');
+  try {
+    var r = await enviar({ accion: 'costo_caja', caja_id: cajaId }, true);
+    if (!r.ok) return pintar('<div class="aviso a-err">' + esc(r.error) + '</div>' +
+      '<button class="b-ghost" id="bV">Volver</button>');
+
+    pintar(
+      '<div class="card"><h3>' + esc(r.procedimiento || cajaId) + '</h3>' +
+      '<div class="lista">' +
+      '<div class="item"><div class="l"><div>Costo real</div></div>' +
+        '<span class="mono">' + pesos(r.costo_real) + '</span></div>' +
+      '<div class="item"><div class="l"><div>Costo fiscal</div></div>' +
+        '<span class="mono">' + pesos(r.costo_fiscal) + '</span></div>' +
+      '<div class="item"><div class="l"><div>Costeado</div>' +
+        '<div class="mini">' + r.piezas_costeadas + ' de ' + r.piezas + ' pieza(s)</div></div>' +
+        pillCobertura(r.cobertura) + '</div>' +
+      '</div>' +
+      (r.cobertura < 100
+        ? '<p class="mini">Faltan ' + r.renglones_sin_costo + ' renglón(es) por costear: ' +
+          'su lote entró sin precio. Lo que ves es un piso.</p>'
+        : '') +
+      '</div>' +
+
+      '<div class="card"><h3>Renglón por renglón</h3><div class="lista">' +
+      r.lineas.map(function (l) {
+        return '<div class="item"><div class="l">' +
+          '<div>' + esc(l.nombre) +
+            (l.via === 'CONTROLADO' ? ' <span class="pill p-warn">controlado</span>' : '') +
+          '</div>' +
+          '<div class="mini mono">' + esc(l.sku) + ' · ' + esc(l.lote_id) +
+            ' · ' + l.cantidad + ' pz</div></div>' +
+          (l.costeado
+            ? '<span class="mono">' + pesos(l.importe_real) + '</span>'
+            : '<span class="pill p-crit">sin precio</span>') +
+          '</div>';
+      }).join('') + '</div></div>' +
+
+      '<button class="b-ghost" id="bV">Volver</button>');
+    $('bV').onclick = function () { pantallaCostos(); };
+  } catch (e) {
+    pintar('<div class="aviso a-err">Sin conexión.</div>' +
+           '<button class="b-ghost" id="bV">Volver</button>');
+    $('bV').onclick = function () { pantallaCostos(); };
+  }
+}
+
+/* =================================================================
+   Lotes por costear
+
+   El precio casi siempre llega después de la mercancía. Esta pantalla es
+   el "después": se ordena por cuántas cirugías está dejando sin costear
+   cada lote, que es lo que de verdad estorba.
+   ================================================================= */
+
+async function pantallaPorCostear() {
+  encabezado('Lotes por costear', 'Los que entraron sin precio');
+  pintar('<div class="card"><p class="sub">Cargando…</p></div>');
+  try {
+    var r = await enviar({ accion: 'lotes_por_costear' }, true);
+    if (!r.ok) return pintar('<div class="aviso a-err">' + esc(r.error) + '</div>' +
+      '<button class="b-ghost" onclick="pantallaInicio()">Volver</button>');
+
+    if (!r.total) {
+      return pintar('<div class="aviso a-ok">Todos los lotes tienen precio.</div>' +
+        '<button class="b-ghost" onclick="pantallaInicio()">Volver</button>');
+    }
+
+    pintar(
+      '<div class="card"><h3>' + r.total + ' lote(s) sin precio</h3>' +
+      '<p class="mini">' + (r.detienen_cirugias
+        ? '<b>' + r.detienen_cirugias + '</b> de ellos ya salieron a una cirugía: ' +
+          'ésos van primero, porque son los que están dejando una caja sin costear.'
+        : 'Ninguno ha salido todavía a cirugía.') +
+      ' El costo se toma de la factura. Si el real y el fiscal son el mismo, ' +
+      'basta con llenar el real.</p></div>' +
+
+      r.lotes.slice(0, 40).map(function (l) {
+        return '<div class="card">' +
+          '<h3>' + esc(l.nombre) + '</h3>' +
+          '<p class="mini mono">' + esc(l.lote_id) + ' · ' + esc(l.sku) +
+            ' · ' + l.cantidad_inicial + ' pz' +
+            (l.proveedor ? ' · ' + esc(l.proveedor) : '') +
+            (l.fecha_recepcion ? ' · ' + esc(l.fecha_recepcion) : '') + '</p>' +
+          (l.cirugias
+            ? '<p class="mini"><span class="pill p-crit">deja ' + l.cirugias +
+              ' cirugía(s) sin costear</span></p>'
+            : '') +
+          '<div class="dos">' +
+          '<div class="campo"><label>Costo real por pieza</label>' +
+            '<input class="cReal" data-lote="' + esc(l.lote_id) + '" type="number" ' +
+            'min="0" step="0.01" inputmode="decimal" placeholder="Lo que se pagó"></div>' +
+          '<div class="campo"><label>Costo fiscal (si difiere)</label>' +
+            '<input class="cFiscal" data-lote="' + esc(l.lote_id) + '" type="number" ' +
+            'min="0" step="0.01" inputmode="decimal" placeholder="Igual al real"></div>' +
+          '</div>' +
+          '<button class="b-dark" data-guardar="' + esc(l.lote_id) + '">Guardar precio</button>' +
+          '</div>';
+      }).join('') +
+      (r.total > 40 ? '<p class="mini">Se muestran los 40 más urgentes de ' + r.total + '.</p>' : '') +
+      '<button class="b-ghost" id="bV">Volver</button>');
+
+    Array.prototype.forEach.call(document.querySelectorAll('[data-guardar]'), function (b) {
+      b.onclick = async function () {
+        var lote = this.getAttribute('data-guardar');
+        var real = document.querySelector('.cReal[data-lote="' + lote + '"]').value.trim();
+        var fiscal = document.querySelector('.cFiscal[data-lote="' + lote + '"]').value.trim();
+        if (real === '') return alertar('Falta el costo real.');
+        /* Si nadie dijo otra cosa, el fiscal es el real: así se evita que la
+           mitad de los lotes queden con fiscal vacío y el reporte fiscal salga
+           sistemáticamente más bajo que el real sin que se note. */
+        var cambios = { costo_unitario: real, costo_fiscal: fiscal === '' ? real : fiscal };
+        this.disabled = true; this.textContent = 'Guardando…';
+        var res = await enviar({ accion: 'lote_editar', lote_id: lote,
+          cambios: cambios, motivo: 'Precio de la factura' }, true);
+        if (!res.ok) {
+          alertar(res.error);
+          this.disabled = false; this.textContent = 'Guardar precio';
+          return;
+        }
+        this.textContent = 'Guardado';
+      };
+    });
+    $('bV').onclick = function () { pantallaInicio(); };
+  } catch (e) {
+    pintar('<div class="aviso a-err">Sin conexión.</div>' +
+           '<button class="b-ghost" onclick="pantallaInicio()">Volver</button>');
+  }
 }
 
 async function pantallaUsuarios() {
