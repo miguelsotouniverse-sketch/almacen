@@ -1896,6 +1896,31 @@ async function pantallaCostoCaja(cajaId) {
    cada lote, que es lo que de verdad estorba.
    ================================================================= */
 
+/* La tarjeta de un lote por costear. Se usa dos veces: arriba los que ya
+   detuvieron una cirugía, y plegados abajo los que siguen en el anaquel. */
+function tarjetaLote(l) {
+  return '<div class="card">' +
+    '<h3>' + esc(l.nombre) + '</h3>' +
+    '<p class="mini mono">' + esc(l.lote_id) + ' · ' + esc(l.sku) +
+      ' · ' + l.cantidad_inicial + ' pz' +
+      (l.proveedor ? ' · ' + esc(l.proveedor) : '') +
+      (l.fecha_recepcion ? ' · ' + esc(l.fecha_recepcion) : '') + '</p>' +
+    (l.cirugias
+      ? '<p class="mini"><span class="pill p-crit">deja ' + l.cirugias +
+        ' cirugía(s) sin costear</span></p>'
+      : '') +
+    '<div class="dos">' +
+    '<div class="campo"><label>Costo real por pieza</label>' +
+      '<input class="cReal" data-lote="' + esc(l.lote_id) + '" type="number" ' +
+      'min="0" step="0.01" inputmode="decimal" placeholder="Lo que se pagó"></div>' +
+    '<div class="campo"><label>Costo fiscal (si difiere)</label>' +
+      '<input class="cFiscal" data-lote="' + esc(l.lote_id) + '" type="number" ' +
+      'min="0" step="0.01" inputmode="decimal" placeholder="Igual al real"></div>' +
+    '</div>' +
+    '<button class="b-dark" data-guardar="' + esc(l.lote_id) + '">Guardar precio</button>' +
+    '</div>';
+}
+
 async function pantallaPorCostear() {
   encabezado('Lotes por costear', 'Los que entraron sin precio');
   pintar('<div class="card"><p class="sub">Cargando…</p></div>');
@@ -1918,29 +1943,17 @@ async function pantallaPorCostear() {
       ' El costo se toma de la factura. Si el real y el fiscal son el mismo, ' +
       'basta con llenar el real.</p></div>' +
 
-      r.lotes.slice(0, 40).map(function (l) {
-        return '<div class="card">' +
-          '<h3>' + esc(l.nombre) + '</h3>' +
-          '<p class="mini mono">' + esc(l.lote_id) + ' · ' + esc(l.sku) +
-            ' · ' + l.cantidad_inicial + ' pz' +
-            (l.proveedor ? ' · ' + esc(l.proveedor) : '') +
-            (l.fecha_recepcion ? ' · ' + esc(l.fecha_recepcion) : '') + '</p>' +
-          (l.cirugias
-            ? '<p class="mini"><span class="pill p-crit">deja ' + l.cirugias +
-              ' cirugía(s) sin costear</span></p>'
-            : '') +
-          '<div class="dos">' +
-          '<div class="campo"><label>Costo real por pieza</label>' +
-            '<input class="cReal" data-lote="' + esc(l.lote_id) + '" type="number" ' +
-            'min="0" step="0.01" inputmode="decimal" placeholder="Lo que se pagó"></div>' +
-          '<div class="campo"><label>Costo fiscal (si difiere)</label>' +
-            '<input class="cFiscal" data-lote="' + esc(l.lote_id) + '" type="number" ' +
-            'min="0" step="0.01" inputmode="decimal" placeholder="Igual al real"></div>' +
-          '</div>' +
-          '<button class="b-dark" data-guardar="' + esc(l.lote_id) + '">Guardar precio</button>' +
-          '</div>';
-      }).join('') +
-      (r.total > 40 ? '<p class="mini">Se muestran los 40 más urgentes de ' + r.total + '.</p>' : '') +
+      /* Primero los que ya detuvieron una cirugía: ésos son los que están
+         costando dinero hoy. El resto queda plegado para que la pantalla no
+         abra con doscientas tarjetas. */
+      r.lotes.filter(function (l) { return l.cirugias > 0; }).map(tarjetaLote).join('') +
+      (r.lotes.filter(function (l) { return !l.cirugias; }).length
+        ? '<details class="mas"><summary>Los que todavía no salen a cirugía (' +
+          r.lotes.filter(function (l) { return !l.cirugias; }).length + ')</summary><div>' +
+          r.lotes.filter(function (l) { return !l.cirugias; }).map(tarjetaLote).join('') +
+          '</div></details>'
+        : '') +
+      '<button class="b-ghost" id="bCsv">Bajar la lista</button>' +
       '<button class="b-ghost" id="bV">Volver</button>');
 
     Array.prototype.forEach.call(document.querySelectorAll('[data-guardar]'), function (b) {
@@ -1964,6 +1977,30 @@ async function pantallaPorCostear() {
         this.textContent = 'Guardado';
       };
     });
+    /* Para trabajarla contra las facturas fuera de la app: se baja, se llena
+       en una hoja de cálculo y los precios se capturan de regreso aquí. */
+    $('bCsv').onclick = function () {
+      var cab = ['Insumo','Clave','Lote','Piezas','Existencia','Proveedor',
+                 'Fecha de recepción','Comprobante','Cirugías que detiene',
+                 'Costo real por pieza','Costo fiscal'];
+      function celda(v) {
+        var t = String(v === null || v === undefined ? '' : v);
+        return /[",;\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+      }
+      var lineas = [cab.join(',')].concat(r.lotes.map(function (l) {
+        return [l.nombre, l.sku, l.lote_id, l.cantidad_inicial, l.existencia,
+                l.proveedor, l.fecha_recepcion, l.comprobante, l.cirugias, '', '']
+               .map(celda).join(',');
+      }));
+      /* El BOM es para que Excel en español no parta los acentos. */
+      var blob = new Blob(['\ufeff' + lineas.join('\r\n')],
+                          { type: 'text/csv;charset=utf-8;' });
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'lotes-por-costear-' + hoyISO() + '.csv';
+      document.body.appendChild(a); a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    };
     $('bV').onclick = function () { pantallaInicio(); };
   } catch (e) {
     pintar('<div class="aviso a-err">Sin conexión.</div>' +
