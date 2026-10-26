@@ -1896,6 +1896,106 @@ async function pantallaCostoCaja(cajaId) {
    cada lote, que es lo que de verdad estorba.
    ================================================================= */
 
+/* =================================================================
+   Captura de costo
+   =================================================================
+   El costo vive POR UNIDAD, y la unidad no siempre es la pieza: hay insumos
+   que se llevan en mL, en par, en frasco. La pantalla vieja pedia "costo
+   unitario" a secas y aceptaba lo que dijera la factura, que casi siempre
+   viene por envase. Asi entraron once precios con el valor de la caja donde
+   iba el de la pieza -la lidocaina 50 veces arriba, las jeringas 10- y no se
+   vio hasta compararlos contra las facturas tres semanas despues.
+
+   Tres cosas lo evitan, y las tres son de pantalla, no de quien captura:
+   decir que unidad es, dejar capturar el precio del empaque y dividir aqui,
+   y enseñar en vivo cuanto suma el lote completo. $68.82 por mL no se lee
+   como error; "$22,022 este lote" si.
+   ================================================================= */
+
+function unidadDe(sku) {
+  var u = '';
+  (((estado.cat || {}).catalogo) || []).forEach(function (c) {
+    if (String(c.sku).toUpperCase() === String(sku).toUpperCase()) u = c.unidad_base || '';
+  });
+  return u || 'pieza';
+}
+
+function plural(u) {
+  u = String(u || 'pieza');
+  if (u === 'mL' || u === 'par') return u;
+  return u + 's';
+}
+
+/* El bloque de captura. 'k' es la llave con la que se arman los ids, para
+   que la misma funcion sirva en la recepcion y en cada una de las 180
+   tarjetas de la pantalla de costeo. */
+function bloqueCosto(k, unidad, etiqueta) {
+  return '<div class="campo"><label>' + esc(etiqueta) + '</label>' +
+    '<div class="dos">' +
+      '<input id="' + k + 'Monto" type="number" min="0" step="any" ' +
+        'inputmode="decimal" placeholder="Lo que se pag\u00f3">' +
+      '<select id="' + k + 'Modo">' +
+        '<option value="U">por ' + esc(unidad) + '</option>' +
+        '<option value="P">por empaque</option>' +
+      '</select>' +
+    '</div></div>' +
+    '<div class="campo oculto" id="' + k + 'Caja">' +
+      '<label>\u00bfCu\u00e1ntas ' + esc(plural(unidad)) + ' trae el empaque?</label>' +
+      '<input id="' + k + 'Piezas" type="number" min="0" step="any" inputmode="decimal" ' +
+        'placeholder="Como viene en la factura: C/100, C/5\u2026"></div>' +
+    '<p class="mini" id="' + k + 'Eco"></p>';
+}
+
+/* Lo que de verdad se va a guardar: el costo por unidad. Devuelve '' si no
+   se captur\u00f3 nada -vacio no es cero- y {error} si no cuadra. */
+function leerCosto(k) {
+  var crudo = ($(k + 'Monto').value || '').trim();
+  if (crudo === '') return { valor: '' };
+  var monto = parseFloat(crudo);
+  if (isNaN(monto) || monto < 0) return { error: 'El costo no es un n\u00famero v\u00e1lido.' };
+  if ($(k + 'Modo').value !== 'P') return { valor: monto };
+  var pz = parseFloat(($(k + 'Piezas').value || '').trim());
+  if (!pz || pz <= 0) {
+    return { error: 'Capturaste el precio del empaque pero no cu\u00e1ntas unidades trae. ' +
+                    'Viene en la factura, junto a la descripci\u00f3n: C/100, C/5, C/12.' };
+  }
+  /* Cuatro decimales porque una caja de 100 a $142.80 da 1.428 exacto y
+     redondear a dos ya mueve el costo del lote completo. */
+  return { valor: Math.round(monto / pz * 10000) / 10000 };
+}
+
+/* El eco. 'getCant' es una funcion porque en la recepcion la cantidad se
+   esta tecleando al mismo tiempo. */
+function cablearCosto(k, unidad, getCant) {
+  function pinta() {
+    var caja = $(k + 'Caja'), eco = $(k + 'Eco');
+    if (!caja || !eco) return;
+    if ($(k + 'Modo').value === 'P') caja.classList.remove('oculto');
+    else caja.classList.add('oculto');
+
+    var r = leerCosto(k);
+    if (r.error) { eco.textContent = r.error; return; }
+    if (r.valor === '') {
+      eco.textContent = 'Si el proveedor todav\u00eda no manda precio, d\u00e9jalo vac\u00edo. ' +
+                        'Vac\u00edo no es cero.';
+      return;
+    }
+    var t = '$' + r.valor + ' por ' + unidad;
+    var cant = getCant ? parseFloat(getCant()) : 0;
+    if (cant > 0) {
+      t += ' \u00b7 ' + cant + ' ' + plural(unidad) + ' = ' +
+           pesos(Math.round(r.valor * cant * 100) / 100);
+    }
+    eco.textContent = t;
+  }
+  ['Monto', 'Modo', 'Piezas'].forEach(function (s) {
+    var e = $(k + s);
+    if (e) { e.oninput = pinta; e.onchange = pinta; }
+  });
+  pinta();
+  return pinta;
+}
+
 /* La tarjeta de un lote por costear. Se usa dos veces: arriba los que ya
    detuvieron una cirugía, y plegados abajo los que siguen en el anaquel. */
 function tarjetaLote(l) {
@@ -1909,14 +2009,12 @@ function tarjetaLote(l) {
       ? '<p class="mini"><span class="pill p-crit">deja ' + l.cirugias +
         ' cirugía(s) sin costear</span></p>'
       : '') +
-    '<div class="dos">' +
-    '<div class="campo"><label>Costo real por pieza</label>' +
-      '<input class="cReal" data-lote="' + esc(l.lote_id) + '" type="number" ' +
-      'min="0" step="0.01" inputmode="decimal" placeholder="Lo que se pagó"></div>' +
-    '<div class="campo"><label>Costo fiscal (si difiere)</label>' +
+    bloqueCosto('k' + l.lote_id, unidadDe(l.sku),
+                'Costo real por ' + unidadDe(l.sku)) +
+    '<div class="campo"><label>Costo fiscal por ' + esc(unidadDe(l.sku)) +
+      ' (si difiere)</label>' +
       '<input class="cFiscal" data-lote="' + esc(l.lote_id) + '" type="number" ' +
-      'min="0" step="0.01" inputmode="decimal" placeholder="Igual al real"></div>' +
-    '</div>' +
+      'min="0" step="any" inputmode="decimal" placeholder="Igual al real"></div>' +
     '<button class="b-dark" data-guardar="' + esc(l.lote_id) + '">Guardar precio</button>' +
     '</div>';
 }
@@ -1956,10 +2054,18 @@ async function pantallaPorCostear() {
       '<button class="b-ghost" id="bCsv">Bajar la lista</button>' +
       '<button class="b-ghost" id="bV">Volver</button>');
 
+    /* Cada tarjeta lleva su propio eco; la cantidad del lote ya es fija. */
+    r.lotes.forEach(function (l) {
+      cablearCosto('k' + l.lote_id, unidadDe(l.sku),
+                   function () { return l.cantidad_inicial; });
+    });
+
     Array.prototype.forEach.call(document.querySelectorAll('[data-guardar]'), function (b) {
       b.onclick = async function () {
         var lote = this.getAttribute('data-guardar');
-        var real = document.querySelector('.cReal[data-lote="' + lote + '"]').value.trim();
+        var leido = leerCosto('k' + lote);
+        if (leido.error) return alertar(leido.error);
+        var real = leido.valor === '' ? '' : String(leido.valor);
         var fiscal = document.querySelector('.cFiscal[data-lote="' + lote + '"]').value.trim();
         if (real === '') return alertar('Falta el costo real.');
         /* Si nadie dijo otra cosa, el fiscal es el real: así se evita que la
@@ -2358,11 +2464,9 @@ function pantallaLineas() {
     '<div class="campo"><label>Lote del fabricante</label><input id="rLote"></div>' +
     '<div class="campo"><label>Caducidad</label><input id="rCad" type="date"></div>' +
     '</div>' +
-    '<div class="dos">' +
-    '<div class="campo"><label>Cantidad (unidad base)</label><input id="rCant" type="number" inputmode="decimal" min="0" step="any"></div>' +
-    '<div class="campo"><label>Costo unitario real</label><input id="rCosto" type="number" inputmode="decimal" min="0" step="any" placeholder="Déjalo vacío si aún no sabes"></div>' +
-    '</div>' +
-    '<p class="mini">Si el proveedor todavía no manda precios, deja el costo vacío. El lote entra igual y queda marcado para costearlo después. Vacío no es cero.</p>' +
+    '<div class="campo"><label>Cantidad (<span id="rUni">unidad base</span>)</label>' +
+      '<input id="rCant" type="number" inputmode="decimal" min="0" step="any"></div>' +
+    '<div id="rCostoCaja">' + bloqueCosto('rc', 'unidad', 'Costo real') + '</div>' +
     '<div class="campo"><label>Costo fiscal (si es distinto)</label><input id="rFiscal" type="number" inputmode="decimal" min="0" step="any" placeholder="Igual al real si lo dejas vacío"></div>' +
     '<button class="b-dark" id="bAdd">Agregar renglón</button>' +
     '<div class="espacio"></div>' +
@@ -2379,12 +2483,29 @@ function pantallaLineas() {
   $('bAtras').onclick = function () { pantallaCabecera(); };
   $('bNuevoSku').onclick = function () { pantallaSkuNuevo(); };
 
+  cablearCosto('rc', 'unidad', function () { return $('rCant').value; });
+  $('rCant').oninput = function () { cablearCosto('rc', $('rUni').textContent,
+                                                  function () { return $('rCant').value; }); };
+
   /* La foto del insumo elegido se muestra sola, sin un botón más que picar:
      quien recibe tiene las manos ocupadas con la caja. */
+  /* La unidad del insumo manda sobre la etiqueta del costo: hasta que no se
+     elige producto no se sabe si el precio va por pieza, por mL o por par. */
+  function ajustarUnidad(art) {
+    var u = art ? (art.unidad_base || 'pieza') : 'unidad';
+    $('rUni').textContent = u;
+    var guardado = { m: $('rcMonto').value, mo: $('rcModo').value, p: $('rcPiezas').value };
+    $('rCostoCaja').innerHTML = bloqueCosto('rc', u, 'Costo real');
+    $('rcMonto').value = guardado.m; $('rcModo').value = guardado.mo;
+    $('rcPiezas').value = guardado.p;
+    cablearCosto('rc', u, function () { return $('rCant').value; });
+  }
+
   $('rSku').onchange = function () {
     var sku = this.value.trim().toUpperCase();
     var art = null;
     c.catalogo.forEach(function (s) { if (String(s.sku).toUpperCase() === sku) art = s; });
+    ajustarUnidad(art);
     var img = $('rFoto'), nota = $('rPista');
     img.classList.add('oculto');
     if (!art) { nota.textContent = 'Ese código todavía no está en el catálogo.'; return; }
@@ -2416,10 +2537,9 @@ function pantallaLineas() {
     if (!cant || cant <= 0) return alertar('Falta la cantidad.');
     /* El costo puede faltar: se captura hoy y se cuesta cuando llegue la
        factura. Vacío se manda vacío, no cero, para poder encontrarlo después. */
-    var crudoCosto = $('rCosto').value.trim();
-    var costo = crudoCosto === '' ? '' : parseFloat(crudoCosto);
-    if (costo !== '' && (isNaN(costo) || costo < 0))
-      return alertar('El costo unitario no es un número válido.');
+    var leido = leerCosto('rc');
+    if (leido.error) return alertar(leido.error);
+    var costo = leido.valor;
 
     var crudoFiscal = $('rFiscal').value.trim();
     var fiscal = crudoFiscal === '' ? costo : parseFloat(crudoFiscal);
