@@ -264,6 +264,10 @@ label.check input{width:19px;height:19px;margin:1px 0 0;flex:0 0 auto;accent-col
 .lista .item .l span{display:block;font-family:'IBM Plex Mono',monospace;
   font-size:.6rem;color:var(--ink-3);letter-spacing:.06em}
 .lista .item .l div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:210px}
+/* Hay renglones donde el texto de abajo ES el dato —"sin ninguna cirugía
+   costeada al 100 %"— y cortarlo con puntos suspensivos esconde justo la
+   advertencia. Esos se marcan y se dejan correr en varias líneas. */
+.lista .item .l div.suelta{white-space:normal;overflow:visible;text-overflow:clip;max-width:none}
 
 .linea{border:1px solid var(--rule);border-radius:9px;padding:12px 13px;margin-bottom:10px;
   background:var(--surface)}
@@ -1798,7 +1802,7 @@ async function pantallaCostos() {
         ? '<div class="lista">' + r.resumen.map(function (g) {
             return '<div class="item"><div class="l">' +
               '<div>' + esc(g.procedimiento) + '</div>' +
-              '<div class="mini">' + g.cirugias + ' cirugía(s) · ' +
+              '<div class="mini suelta">' + g.cirugias + ' cirugía(s) · ' +
                 (g.promedio !== null
                   ? 'promedio ' + pesos(g.promedio) +
                     (g.completas > 1 ? ' · de ' + pesos(g.minimo) + ' a ' + pesos(g.maximo) : '') +
@@ -1814,7 +1818,7 @@ async function pantallaCostos() {
       '<div class="lista">' + r.cirugias.map(function (c) {
         return '<div class="item"><div class="l">' +
           '<div>' + esc(c.procedimiento) + '</div>' +
-          '<div class="mini mono">' + esc(c.caja_id) +
+          '<div class="mini mono suelta">' + esc(c.caja_id) +
             (c.cerrada_en ? ' · ' + esc(String(c.cerrada_en).slice(0, 10)) : '') +
             ' · ' + c.renglones + ' renglón(es)</div></div>' +
           '<button class="b-chico" data-caja="' + esc(c.caja_id) + '">' +
@@ -1852,7 +1856,7 @@ async function pantallaCostoCaja(cajaId) {
       '<div class="item"><div class="l"><div>Costo fiscal</div></div>' +
         '<span class="mono">' + pesos(r.costo_fiscal) + '</span></div>' +
       '<div class="item"><div class="l"><div>Costeado</div>' +
-        '<div class="mini">' + r.piezas_costeadas + ' de ' + r.piezas + ' pieza(s)</div></div>' +
+        '<div class="mini suelta">' + r.piezas_costeadas + ' de ' + r.piezas + ' pieza(s)</div></div>' +
         pillCobertura(r.cobertura) + '</div>' +
       '</div>' +
       (r.cobertura < 100
@@ -1867,7 +1871,7 @@ async function pantallaCostoCaja(cajaId) {
           '<div>' + esc(l.nombre) +
             (l.via === 'CONTROLADO' ? ' <span class="pill p-warn">controlado</span>' : '') +
           '</div>' +
-          '<div class="mini mono">' + esc(l.sku) + ' · ' + esc(l.lote_id) +
+          '<div class="mini mono suelta">' + esc(l.sku) + ' · ' + esc(l.lote_id) +
             ' · ' + l.cantidad + ' pz</div></div>' +
           (l.costeado
             ? '<span class="mono">' + pesos(l.importe_real) + '</span>'
