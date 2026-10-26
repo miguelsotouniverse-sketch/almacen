@@ -2802,8 +2802,12 @@ function pantallaCajaNueva() {
 
 /* Los controlados NO están en la caja. El bloque existe para decirlo: si no
    aparecieran por ningún lado, quien surte los buscaría adentro. */
-function bloqueControlados(lista, cerrada) {
-  if (!lista.length) return '';
+function bloqueControlados(lista, cerrada, cajaId) {
+  /* Antes el bloque desaparecia cuando la plantilla no preveia ningun
+     controlado, y con el desaparecia la unica puerta para registrar uno
+     que si se uso. Si quien mira puede capturar y la caja sigue abierta,
+     el bloque se queda aunque este vacio. */
+  if (!lista.length && (cerrada || !puedeControlados())) return '';
   var falta = lista.filter(function (x) {
     return String(x.estado).toUpperCase() !== 'CAPTURADA';
   }).length;
@@ -2834,7 +2838,12 @@ function bloqueControlados(lista, cerrada) {
               : '<button class="b-chico" data-min="' + esc(x.min_id) + '">Registrar</button>')) +
         '</div>';
     }).join('') +
-    '</div></div>';
+    '</div>' +
+    (cerrada || !puedeControlados() || !cajaId
+      ? ''
+      : '<button class="b-ghost" data-addctr="' + esc(cajaId) + '">' +
+        'Agregar otro controlado</button>') +
+    '</div>';
 }
 
 /* Qué cirugías traen el libro pendiente. */
@@ -2878,7 +2887,12 @@ async function pantallaLibro() {
               (x.previsto ? ' · la plantilla preveía ' + esc(x.previsto) : '') + '</div>' +
             '</div><button class="b-chico" data-min="' + esc(x.min_id) + '">Registrar</button></div>';
         }).join('') +
-        '</div></div>';
+        '</div>' +
+        (puedeControlados()
+          ? '<button class="b-ghost" data-addctr="' + esc(c) + '">' +
+            'Agregar otro controlado</button>'
+          : '') +
+        '</div>';
     }).join('') +
 
     '<button class="b-ghost" id="bV">Volver</button>');
@@ -2886,7 +2900,96 @@ async function pantallaLibro() {
   Array.prototype.forEach.call(document.querySelectorAll('[data-min]'), function (b) {
     b.onclick = function () { pantallaMinistracion(this.getAttribute('data-min'), 'libro'); };
   });
+
+  Array.prototype.forEach.call(document.querySelectorAll('[data-addctr]'), function (b) {
+    b.onclick = function () {
+      pantallaAgregarControlado(this.getAttribute('data-addctr'), 'libro');
+    };
+  });
   $('bV').onclick = function () { pantallaInicio(); };
+}
+
+/* Un controlado que la caja no preveia.
+
+   No es una excepcion rara: la plantilla preveia una ampolleta y se abrieron
+   dos, o la cirugia uso algo que ese procedimiento no suele llevar. El
+   renglon se abre aqui y de ahi se captura por el mismo camino que todos los
+   demas, con su propio folio. Sin esto la caja no podia cerrar, porque el
+   consumo existia y el libro no tenia donde recibirlo. */
+async function pantallaAgregarControlado(cajaId, volver) {
+  encabezado('Agregar controlado', cajaId);
+  pintar('<div class="card"><p class="sub">Cargando\u2026</p></div>');
+
+  function regresar() {
+    if (volver === 'libro') pantallaLibro(); else pantallaCajaDetalle(cajaId);
+  }
+
+  if (!estado.cat || !estado.cat.catalogo) { try { await cargarCat(); } catch (e) {} }
+
+  var ctr = (((estado.cat || {}).catalogo) || []).filter(function (c) {
+    return String(c.controlado).toUpperCase() === 'SI';
+  }).sort(function (a, b) {
+    return String(a.nombre || a.sku).localeCompare(String(b.nombre || b.sku));
+  });
+
+  if (!ctr.length) {
+    pintar('<div class="aviso a-err">El cat\u00e1logo no tiene ning\u00fan insumo marcado ' +
+           'como controlado, as\u00ed que no hay nada que agregar. Se marca en la ficha ' +
+           'del insumo.</div><button class="b-ghost" id="bV">Volver</button>');
+    $('bV').onclick = regresar;
+    return;
+  }
+
+  pintar(
+    '<div class="card"><h3>\u00bfCu\u00e1l se us\u00f3?</h3>' +
+    '<p class="mini">Abre un rengl\u00f3n de libro para esta cirug\u00eda. Una pieza, un ' +
+    'rengl\u00f3n: si se abrieron dos ampolletas, se captura la primera y se vuelve ' +
+    'aqu\u00ed por la segunda.</p>' +
+    '<div class="campo"><input id="acQ" placeholder="Nombre o clave" autocomplete="off"></div>' +
+    '<div class="lista" id="acL"></div></div>' +
+    '<button class="b-ghost" id="bV">Volver</button>');
+
+  async function abrir(sku, btn) {
+    btn.disabled = true; btn.textContent = 'Abriendo\u2026';
+    try {
+      var r = await enviar({ accion: 'ministracion_agregar',
+                             caja_id: cajaId, sku: sku }, true);
+      if (!r.ok) {
+        btn.disabled = false; btn.textContent = 'Abrir rengl\u00f3n';
+        return alertar(r.error);
+      }
+      pantallaMinistracion(r.min_id, volver, cajaId);
+    } catch (e) {
+      btn.disabled = false; btn.textContent = 'Abrir rengl\u00f3n';
+      alertar('Sin se\u00f1al. El folio del rengl\u00f3n lo da el servidor, as\u00ed que esto ' +
+              'no se puede dejar encolado.');
+    }
+  }
+
+  function dibuja() {
+    var t = String($('acQ').value || '').trim().toLowerCase();
+    var l = t ? ctr.filter(function (c) {
+      return (String(c.nombre || '') + ' ' + String(c.sku)).toLowerCase().indexOf(t) >= 0;
+    }) : ctr;
+    $('acL').innerHTML = l.length
+      ? l.slice(0, 40).map(function (c) {
+          return '<div class="item"><div class="l">' +
+            '<div>' + esc(c.nombre || c.sku) + '</div>' +
+            '<div class="mini mono">' + esc(c.sku) +
+              (c.volumen_pieza ? ' \u00b7 ' + esc(c.volumen_pieza) + ' mL por pieza' : '') +
+            '</div></div>' +
+            '<button class="b-chico" data-sku="' + esc(c.sku) + '">Abrir rengl\u00f3n</button>' +
+            '</div>';
+        }).join('')
+      : '<p class="sub centro">Nada con ese nombre.</p>';
+    Array.prototype.forEach.call($('acL').querySelectorAll('[data-sku]'), function (b) {
+      b.onclick = function () { abrir(this.getAttribute('data-sku'), this); };
+    });
+  }
+
+  $('acQ').oninput = dibuja;
+  $('bV').onclick = regresar;
+  dibuja();
 }
 
 /* Un medicamento, una captura. */
@@ -3067,7 +3170,7 @@ async function pantallaCajaDetalle(cajaId) {
         '</div>' +
         '<button class="b-dark" id="bCerrar"' + (dentro.length ? '' : ' disabled') + '>Cerrar la caja y hacer el corte</button>') +
 
-    bloqueControlados(r.controlados || [], cerrada) +
+    bloqueControlados(r.controlados || [], cerrada, cajaId) +
 
     '<div class="card"><h3>Contenido</h3>' +
     (r.lineas.length
@@ -3084,6 +3187,12 @@ async function pantallaCajaDetalle(cajaId) {
   Array.prototype.forEach.call(document.querySelectorAll('[data-min]'), function (b) {
     b.onclick = function () {
       pantallaMinistracion(this.getAttribute('data-min'), 'caja', cajaId);
+    };
+  });
+
+  Array.prototype.forEach.call(document.querySelectorAll('[data-addctr]'), function (b) {
+    b.onclick = function () {
+      pantallaAgregarControlado(this.getAttribute('data-addctr'), 'caja');
     };
   });
 
