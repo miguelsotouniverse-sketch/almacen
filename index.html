@@ -1080,6 +1080,7 @@ function pintarExistencias() {
       ? '<div>' + lista.map(prod).join('') + '</div>'
       : '<p class="sub centro">Nada que mostrar con ese filtro.</p>') +
     '</div>' +
+    '<button class="b-ghost" id="bBajar">Bajar el almac\u00e9n</button>' +
     '<button class="b-ghost" id="bV">Volver</button>');
 
   var inp = $('qE');
@@ -1095,7 +1096,74 @@ function pintarExistencias() {
   [].forEach.call(document.querySelectorAll('[data-g]'), function (b) {
     b.onclick = function () { $('pg' + b.getAttribute('data-g')).classList.toggle('abierto'); };
   });
+  $('bBajar').onclick = function () { bajarAlmacen(this); };
   $('bV').onclick = function () { pantallaInicio(); };
+}
+
+/* El almac\u00e9n de hoy, en un archivo.
+
+   Un rengl\u00f3n por lote y por ubicaci\u00f3n, que es como de verdad vive el
+   inventario: el mismo insumo puede estar en el anaquel, dentro de una caja
+   y comprometido en una dotaci\u00f3n al mismo tiempo, y sumarlos en una sola
+   cifra es justo lo que hace que un conteo f\u00edsico no cuadre nunca.
+
+   Sale lo que el kardex devolvi\u00f3, no lo que el filtro deje a la vista.
+   Quien pide "el almac\u00e9n" quiere el almac\u00e9n, no la b\u00fasqueda que tra\u00eda
+   tecleada. */
+function bajarAlmacen(btn) {
+  var filas = estado.exist || [];
+  if (!filas.length) return alertar('Todav\u00eda no hay existencias le\u00eddas.');
+
+  var uni = {};
+  (((estado.cat || {}).catalogo) || []).forEach(function (c) {
+    uni[String(c.sku).toUpperCase()] = c.unidad_base || 'pieza';
+  });
+
+  var donde = { anaquel: 'En el anaquel', caja: 'Dentro de una caja',
+                dotacion: 'Comprometido en una dotaci\u00f3n' };
+
+  function q(v) {
+    v = String(v === null || v === undefined ? '' : v);
+    return /[",\n\r]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+  }
+
+  var cab = ['Insumo', 'Clave', 'Unidad', 'Existencia', 'D\u00f3nde est\u00e1',
+             'Ubicaci\u00f3n', 'Lote del sistema', 'Lote del fabricante',
+             'Caducidad', 'D\u00edas para caducar'];
+
+  var orden = filas.slice().sort(function (a, b) {
+    var n = String(a.nombre || '').localeCompare(String(b.nombre || ''));
+    return n ? n : String(a.lote_id).localeCompare(String(b.lote_id));
+  });
+
+  var lineas = [cab.map(q).join(',')];
+  orden.forEach(function (x) {
+    var d = diasDeCad(x.caducidad);
+    lineas.push([
+      x.nombre || x.sku, x.sku, uni[String(x.sku).toUpperCase()] || 'pieza',
+      x.cantidad, donde[dondeEsta(x)] || '', x.ubic_nombre || x.ubic_id,
+      x.lote_id, x.lote_proveedor || '', x.caducidad || '',
+      d === null ? '' : d
+    ].map(q).join(','));
+  });
+
+  /* El BOM va primero o Excel abre los acentos rotos, que es la primera
+     queja de cualquier exportaci\u00f3n en espa\u00f1ol. */
+  var blob = new Blob(['\ufeff' + lineas.join('\r\n')],
+                      { type: 'text/csv;charset=utf-8;' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'almacen-' + hoyISO() + '.csv';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+
+  if (btn) {
+    btn.textContent = lineas.length - 1 + ' rengl\u00f3n(es) bajados';
+    setTimeout(function () {
+      if (btn) btn.textContent = 'Bajar el almac\u00e9n';
+    }, 4000);
+  }
 }
 
 /* =================================================================
