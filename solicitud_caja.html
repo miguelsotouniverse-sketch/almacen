@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#0C0E0D">
+<title>Solicitud de caja · Zorvix</title>
+
+<style>
+/* ---------- pantalla ---------- */
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  background:#F4F2F1;color:#0C0E0D;
+  font:16px/1.5 'Jost',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  padding-bottom:env(safe-area-inset-bottom);
+}
+header{background:#0C0E0D;color:#F4F2F1;padding:calc(12px + env(safe-area-inset-top)) 16px 12px}
+header b{font-size:1.05rem;display:block}
+header span{font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;color:#9AA09C}
+main{padding:16px;max-width:900px;margin:0 auto}
+
+.card{background:#fff;border:1px solid #D8D2CC;border-radius:10px;padding:16px;margin-bottom:14px}
+h2{font-size:1rem;font-weight:600;margin:0 0 6px}
+p.sub{color:#6E736F;font-size:.9rem;margin:0 0 14px}
+.mini{font-size:.84rem;color:#6E736F;margin:8px 0 0}
+
+label{display:block;font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;
+  color:#6B5D51;margin:0 0 4px}
+input,textarea{width:100%;padding:11px 12px;border:1px solid #D8D2CC;border-radius:8px;
+  font:inherit;font-size:.95rem;background:#fff;color:#0C0E0D}
+textarea{min-height:64px;resize:vertical}
+.campo{margin-bottom:11px}
+.dos{display:grid;grid-template-columns:1fr 1fr;gap:11px}
+@media(max-width:560px){.dos{grid-template-columns:1fr}}
+
+button{
+  width:100%;border:0;border-radius:9px;padding:14px 16px;font:inherit;font-weight:500;
+  cursor:pointer;margin-bottom:9px;
+}
+.b-primary{background:#0C0E0D;color:#F4F2F1}
+.b-ghost{background:#fff;color:#0C0E0D;border:1px solid #D8D2CC}
+
+.aviso{border-radius:9px;padding:12px 14px;font-size:.92rem;margin-bottom:14px}
+.a-err{background:#F5DED8;color:#A33F30}
+
+/* ---------- la hoja ---------- */
+.hoja{
+  background:#fff;color:#0C0E0D;border:1px solid #D8D2CC;border-radius:8px;
+  padding:14mm 12mm;margin:0;
+}
+.cabecera{
+  display:flex;align-items:flex-start;justify-content:space-between;gap:14mm;
+  border-bottom:2px solid #0C0E0D;padding-bottom:8px;margin-bottom:11px;
+}
+.logo{width:46mm;height:auto;display:block}
+.logo-texto{display:none;font-size:17pt;letter-spacing:.3em;font-weight:500}
+.titulo{text-align:right}
+.titulo h3{font-size:14pt;font-weight:400;margin:0;letter-spacing:-.01em;white-space:nowrap}
+.titulo .marca{
+  font-family:'IBM Plex Mono',ui-monospace,'SF Mono',Menlo,monospace;
+  font-size:7pt;letter-spacing:.26em;text-transform:uppercase;color:#6B5D51;margin-top:3px;
+}
+
+.ficha{
+  display:grid;grid-template-columns:repeat(4,1fr);gap:7px 12px;
+  border:1px solid #D8D2CC;border-radius:6px;padding:9px 11px;margin-bottom:11px;
+}
+.ficha .c{font-size:7pt;letter-spacing:.12em;text-transform:uppercase;color:#6B5D51;display:block}
+.ficha .v{font-size:10pt;display:block;min-height:1.3em;border-bottom:.6px dotted #C9C2BB;padding-bottom:1px}
+.ficha .ancho{grid-column:span 2}
+
+table{width:100%;border-collapse:collapse;margin:0 0 4px}
+th{
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:6.6pt;letter-spacing:.1em;
+  text-transform:uppercase;color:#6B5D51;text-align:left;font-weight:500;
+  border-bottom:1.4px solid #0C0E0D;padding:0 5px 4px;
+}
+td{border-bottom:1px solid #E6E1DC;padding:4.5px 5px;font-size:8.6pt;vertical-align:top}
+td.mono{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:7.4pt;color:#3D423F}
+td.num{text-align:center;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:9.4pt}
+td.esc{background:#FAF8F7}
+tr.grupo td{
+  background:#F1EEEB;font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:6.8pt;
+  letter-spacing:.12em;text-transform:uppercase;color:#3D423F;padding:5px;font-weight:500;
+}
+.c-clave{width:22mm}
+.c-pide{width:16mm}
+.c-surte{width:16mm}
+.c-obs{width:34mm}
+
+.sub-t{
+  font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:7pt;letter-spacing:.18em;
+  text-transform:uppercase;color:#6B5D51;margin:13px 0 5px;
+}
+.nota{
+  border-left:3px solid #A19487;background:#F1EEEB;border-radius:0 5px 5px 0;
+  padding:9px 12px;margin:10px 0 0;font-size:8.4pt;color:#3D423F;
+}
+.nota.ojo{border-left-color:#A33F30;background:#F5DED8;color:#A33F30}
+.resumen{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:11px 0 2px}
+.resumen .b{border:1px solid #D8D2CC;border-radius:6px;padding:8px 11px}
+.resumen .k{font-size:6.8pt;letter-spacing:.12em;text-transform:uppercase;color:#6B5D51;display:block}
+.resumen .n{font-family:'IBM Plex Mono',ui-monospace,monospace;font-size:13pt;display:block;margin-top:2px}
+
+.firmas{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:22px}
+.firma{border-top:1px solid #0C0E0D;padding-top:5px;font-size:7.2pt;color:#6E736F;
+  letter-spacing:.06em;text-transform:uppercase}
+.pie{margin-top:14px;font-size:6.8pt;color:#9AA09C;letter-spacing:.06em;
+  display:flex;justify-content:space-between}
+
+/* ---------- impresión ---------- */
+@page{size:Letter;margin:12mm 10mm}
+@media print{
+  html,body{background:#fff}
+  header,#barra{display:none !important}
+  main{padding:0;max-width:none}
+  .hoja{border:0;border-radius:0;padding:0;margin:0}
+  tr{break-inside:avoid;page-break-inside:avoid}
+  /* Un renglon de grupo solo al pie de la hoja deja sus insumos huerfanos
+     en la siguiente: se baja con ellos. */
+  tr.grupo{break-after:avoid;page-break-after:avoid}
+  thead{display:table-header-group}
+  .firmas{break-inside:avoid;page-break-inside:avoid}
+  td.esc{background:transparent;border-left:1px solid #E6E1DC;border-right:1px solid #E6E1DC}
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <b>Solicitud de caja quirúrgica</b>
+  <span id="hSub">Cargando…</span>
+</header>
+
+<main>
+  <div class="card" id="barra">
+    <h2>Los datos de arriba de la hoja</h2>
+    <p class="sub">Todo es opcional: lo que se deje vacío sale como renglón en blanco
+      para llenarlo a mano.</p>
+
+    <div class="dos">
+      <div class="campo"><label>Paciente o folio del caso</label><input id="fPac"></div>
+      <div class="campo"><label>Fecha de la cirugía</label><input id="fFecha" type="date"></div>
+    </div>
+    <div class="dos">
+      <div class="campo"><label>Cirujano</label><input id="fCir"></div>
+      <div class="campo"><label>Anestesiólogo</label><input id="fAnes"></div>
+    </div>
+    <div class="dos">
+      <div class="campo"><label>Solicita</label><input id="fSol"></div>
+      <div class="campo"><label>Hora</label><input id="fHora" type="time"></div>
+    </div>
+    <div class="campo"><label>Observaciones</label><textarea id="fObs"
+      placeholder="Material adicional, lateralidad, lo que el cirujano pidió aparte…"></textarea></div>
+
+    <button class="b-primary" id="bImprimir">Imprimir la solicitud</button>
+    <button class="b-ghost" id="bVolver">Volver a la app</button>
+    <p class="mini" id="nota"></p>
+  </div>
+
+  <div id="hoja"></div>
+</main>
+
+<script>
+/* ------------------------------------------------------------------
+   La plantilla llega por localStorage, igual que las hojas de caja y
+   las etiquetas: la app la deja ahí justo antes de abrir esta página.
+
+   Y a propósito NO se consulta al gateway desde aquí. Esta hoja se
+   imprime en el almacén, que es donde la señal es peor; lo que se
+   necesita ya está en el teléfono.
+   ------------------------------------------------------------------ */
+var LLAVE = 'msu_alm_solicitud_caja';
+var datos = null;
+
+try {
+  var crudo = localStorage.getItem(LLAVE);
+  if (crudo) datos = JSON.parse(crudo);
+} catch (e) { datos = null; }
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c];
+  });
+}
+
+function fechaLarga(iso) {
+  if (!iso) return '';
+  var p = String(iso).split('-');
+  if (p.length !== 3) return iso;
+  var M = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto',
+           'septiembre','octubre','noviembre','diciembre'];
+  return Number(p[2]) + ' de ' + M[Number(p[1]) - 1] + ' de ' + p[0];
+}
+
+function hoyISO() {
+  var d = new Date(), m = d.getMonth() + 1, a = d.getDate();
+  return d.getFullYear() + '-' + (m < 10 ? '0' : '') + m + '-' + (a < 10 ? '0' : '') + a;
+}
+
+/* Renglones en blanco al final de cada bloque: en el quirófano siempre
+   sale algo que la plantilla no traía, y si no hay dónde anotarlo se
+   anota en una servilleta y no llega nunca al sistema. */
+function renglonesVacios(n, celdas) {
+  var fila = '<tr>' + new Array(celdas + 1).join('<td class="esc">&nbsp;</td>') + '</tr>';
+  return new Array(n + 1).join(fila);
+}
+
+function campo(clave, valor, ancho) {
+  return '<div' + (ancho ? ' class="ancho"' : '') + '>' +
+    '<span class="c">' + esc(clave) + '</span>' +
+    '<span class="v">' + esc(valor || '') + '</span></div>';
+}
+
+var NOMBRE_GRUPO = {
+  MED: 'Medicamentos', CNS: 'Consumibles', SUT: 'Suturas', AER: 'Vía aérea',
+  INT: 'Intravenoso', ECG: 'Electrocirugía', TEX: 'Textiles', ROP: 'Ropa',
+  SCR: 'Lavado quirúrgico', VEN: 'Vendajes', CEY: 'Antisépticos',
+  INY: 'Inyectables', MAD: 'Madera', OTROS: 'Otros'
+};
+
+/* Una sola tabla con renglones de grupo, no una tabla por categoria.
+   Nueve tablas chicas ocupan tres hojas para lo que cabe en una, y quien
+   surte pierde el hilo al cambiar de encabezado cada cinco renglones. */
+function tabla(grupos, vacios) {
+  var cuerpo = grupos.map(function (g) {
+    return (g.titulo
+      ? '<tr class="grupo"><td colspan="5">' + esc(g.titulo) + '</td></tr>'
+      : '') +
+      g.lineas.map(function (x) {
+        return '<tr>' +
+          '<td>' + esc(x.item) + '</td>' +
+          '<td class="mono">' + esc(x.sku || '\u2014') + '</td>' +
+          '<td class="num">' + esc(x.cantidad || '') + '</td>' +
+          '<td class="esc"></td>' +
+          '<td class="esc"></td>' +
+          '</tr>';
+      }).join('');
+  }).join('');
+
+  return '<table><thead><tr>' +
+    '<th class="c-nom">Insumo</th>' +
+    '<th class="c-clave">Clave</th>' +
+    '<th class="c-pide">Se pide</th>' +
+    '<th class="c-surte">Surti\u00f3</th>' +
+    '<th class="c-obs">Observaciones</th>' +
+    '</tr></thead><tbody>' + cuerpo + renglonesVacios(vacios || 0, 5) + '</tbody></table>';
+}
+
+function pintar() {
+  if (!datos || !datos.items || !datos.items.length) {
+    document.getElementById('hSub').textContent = 'Sin datos';
+    document.getElementById('barra').innerHTML =
+      '<div class="aviso a-err">No hay ninguna plantilla cargada. Esta hoja se abre desde ' +
+      'la app: Plantillas → el procedimiento → «Imprimir solicitud».</div>' +
+      '<button class="b-ghost" onclick="location.href=\'./\'">Volver a la app</button>';
+    return;
+  }
+
+  var proc = datos.plantilla || '';
+  document.getElementById('hSub').textContent = proc;
+
+  /* Los controlados no viajan en la caja: se surten contra receta, pieza
+     por pieza. Van en su propio bloque para que nadie los busque adentro
+     ni los dé por surtidos al firmar. */
+  var items = datos.items.filter(function (x) { return !x.es_nota; });
+  var notas = datos.items.filter(function (x) { return x.es_nota; });
+  var ctr = items.filter(function (x) { return x.controlado; });
+  var comun = items.filter(function (x) { return !x.controlado; });
+
+  var porCat = {}, orden = [];
+  comun.forEach(function (x) {
+    var k = x.categoria || 'OTROS';
+    if (!porCat[k]) { porCat[k] = []; orden.push(k); }
+    porCat[k].push(x);
+  });
+  orden.sort(function (a, b) {
+    return String(NOMBRE_GRUPO[a] || a).localeCompare(String(NOMBRE_GRUPO[b] || b));
+  });
+
+  var piezas = comun.reduce(function (a, x) { return a + (Number(x.cantidad) || 0); }, 0);
+
+  var cuerpo = '<div class="sub-t">Material de la caja</div>' +
+    tabla(orden.map(function (k) {
+      return { titulo: NOMBRE_GRUPO[k] || k, lineas: porCat[k] };
+    }), 3);
+
+  var f = {
+    pac: document.getElementById('fPac').value.trim(),
+    fecha: document.getElementById('fFecha').value,
+    hora: document.getElementById('fHora').value,
+    cir: document.getElementById('fCir').value.trim(),
+    anes: document.getElementById('fAnes').value.trim(),
+    sol: document.getElementById('fSol').value.trim(),
+    obs: document.getElementById('fObs').value.trim()
+  };
+
+  document.getElementById('hoja').innerHTML =
+    '<div class="hoja">' +
+
+    '<div class="cabecera">' +
+      '<div>' +
+        '<img class="logo" src="zorvix-logo.png" alt="Zorvix" ' +
+        'onerror="this.style.display=\'none\';' +
+        'this.nextElementSibling.style.display=\'block\'">' +
+        '<div class="logo-texto">ZORVIX</div>' +
+      '</div>' +
+      '<div class="titulo"><h3>Solicitud de caja quirúrgica</h3>' +
+        '<div class="marca">' + esc(proc) + ' · ' + esc(fechaLarga(hoyISO())) + '</div></div>' +
+    '</div>' +
+
+    '<div class="ficha">' +
+      campo('Paciente o folio', f.pac, true) +
+      campo('Procedimiento', proc, true) +
+      campo('Fecha de cirugía', fechaLarga(f.fecha)) +
+      campo('Hora', f.hora) +
+      campo('Cirujano', f.cir) +
+      campo('Anestesiólogo', f.anes) +
+      campo('Solicita', f.sol) +
+      campo('Surte', '') +
+      campo('Almacén', '') +
+      campo('Folio de caja', '') +
+    '</div>' +
+
+    '<div class="resumen">' +
+      '<div class="b"><span class="k">Renglones</span><span class="n">' + comun.length + '</span></div>' +
+      '<div class="b"><span class="k">Piezas que se piden</span><span class="n">' +
+        (Math.round(piezas * 100) / 100) + '</span></div>' +
+      '<div class="b"><span class="k">Controlados aparte</span><span class="n">' + ctr.length + '</span></div>' +
+    '</div>' +
+
+    cuerpo +
+
+    (ctr.length
+      ? '<div class="sub-t">Controlados — no van dentro de la caja</div>' +
+        tabla([{ titulo: '', lineas: ctr }], 1) +
+        '<div class="nota ojo">Estos se surten contra receta, pieza por pieza, y los registra ' +
+        'quien lleva regulatorio con su propio folio. No se dan por surtidos al firmar esta hoja.</div>'
+      : '') +
+
+    (notas.length
+      ? '<div class="sub-t">Notas de la plantilla</div>' +
+        '<div class="nota">' + notas.map(function (x) { return esc(x.item); }).join(' · ') + '</div>'
+      : '') +
+
+    '<div class="sub-t">Material adicional que se pidió</div>' +
+    '<table><thead><tr><th class="c-nom">Insumo</th><th class="c-clave">Clave</th>' +
+    '<th class="c-pide">Se pide</th><th class="c-surte">Surtió</th>' +
+    '<th class="c-obs">Quién lo pidió</th></tr></thead>' +
+    '<tbody>' + renglonesVacios(4, 5) + '</tbody></table>' +
+
+    (f.obs ? '<div class="nota">' + esc(f.obs) + '</div>' : '') +
+
+    '<div class="nota">La cantidad es lo que el procedimiento necesita por criterio quirúrgico, ' +
+    'no el promedio de lo que se ha consumido. Lo que no se use regresa a la caja y se cuenta ' +
+    'al cierre: esta hoja pide material, no lo da por consumido.</div>' +
+
+    '<div class="firmas">' +
+      '<div class="firma">Solicita</div>' +
+      '<div class="firma">Surte almacén</div>' +
+      '<div class="firma">Recibe en quirófano</div>' +
+    '</div>' +
+
+    '<div class="pie"><span>Zorvix · Centro Quirúrgico Especializado</span>' +
+      '<span>almacen.miguelsotomd.com</span></div>' +
+
+    '</div>';
+
+  document.getElementById('nota').textContent =
+    comun.length + ' renglón(es) de material y ' + ctr.length + ' controlado(s).';
+}
+
+['fPac', 'fFecha', 'fHora', 'fCir', 'fAnes', 'fSol', 'fObs'].forEach(function (id) {
+  var e = document.getElementById(id);
+  if (e) e.oninput = pintar;
+});
+
+document.getElementById('bImprimir').onclick = function () { window.print(); };
+document.getElementById('bVolver').onclick = function () { location.href = './'; };
+
+pintar();
+</script>
+</body>
+</html>

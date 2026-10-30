@@ -408,6 +408,7 @@ var SES_KEY = 'msu_alm_sesion';
 /* La caja que se va a imprimir se deja aquí y la lee hojas_caja.html. No
    viaja por la URL: una caja de treinta renglones no cabe en una. */
 var HOJAS_KEY = 'msu_alm_hojas_caja';
+var SOLICITUD_KEY = 'msu_alm_solicitud_caja';
 var CAT_KEY = 'msu_alm_cat';
 
 var estado = {
@@ -4361,6 +4362,27 @@ async function pantallaPlantillas() {
   $('bV').onclick = function () { pantallaInicio(); };
 }
 
+/* Los renglones que necesita la hoja de solicitud.
+
+   La plantilla no sabe si algo es controlado -esa bandera vive en el
+   cat\u00e1logo-, y la hoja lo necesita para separarlos: un controlado no
+   viaja dentro de la caja, se surte contra receta y lo registra quien
+   lleva regulatorio. Si salieran mezclados, alguien los dar\u00eda por
+   surtidos al firmar. */
+function paraSolicitud(items) {
+  var ctr = {};
+  (((estado.cat || {}).catalogo) || []).forEach(function (c) {
+    if (String(c.controlado).toUpperCase() === 'SI') ctr[String(c.sku).toUpperCase()] = true;
+  });
+  return (items || []).map(function (x) {
+    return {
+      item: x.item, sku: x.sku || '', cantidad: x.cantidad,
+      categoria: x.categoria || '', es_nota: !!x.es_nota,
+      controlado: !!ctr[String(x.sku || '').toUpperCase()]
+    };
+  });
+}
+
 async function pantallaPlantilla(nombre, soloPendientes) {
   encabezado(nombre, 'Renglones de la plantilla');
   pintar('<div class="card"><p class="sub">Cargando…</p></div>');
@@ -4410,8 +4432,22 @@ async function pantallaPlantilla(nombre, soloPendientes) {
     '<button class="' + (soloPendientes ? 'b-dark' : 'b-ghost') + '" id="bPend">Sólo los que faltan</button>' +
     '</div></div>' +
     '<div class="card">' + (cuerpo || '<p class="sub centro">Nada que mostrar aquí.</p>') + '</div>' +
+    '<button class="b-dark" id="bSolicitud">Imprimir solicitud de caja</button>' +
     '<button class="b-dark" id="bEditarPl">Editar esta plantilla</button>' +
     '<button class="b-ghost" id="bV">Volver a plantillas</button>');
+
+  /* La hoja se imprime en el almac\u00e9n, donde la se\u00f1al es peor: la lista
+     viaja por localStorage y la p\u00e1gina no vuelve a preguntarle al gateway.
+     Se mandan TODOS los renglones, no el filtro de pendientes: quien surte
+     necesita la caja completa, no lo que falta por amarrar. */
+  $('bSolicitud').onclick = function () {
+    try {
+      escribir(SOLICITUD_KEY, { plantilla: nombre, items: paraSolicitud(r.items) });
+      location.href = 'solicitud_caja.html';
+    } catch (e) {
+      alertar('No se pudo preparar la solicitud. Intenta de nuevo.');
+    }
+  };
 
   $('bEditarPl').onclick = function () { pantallaPlantillaEditar(nombre); };
   $('bTodos').onclick = function () { pantallaPlantilla(nombre, false); };
