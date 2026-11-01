@@ -299,6 +299,13 @@ label.check input{width:19px;height:19px;margin:1px 0 0;flex:0 0 auto;accent-col
    como un manual. Un manual se lee una vez; una portada se abre veinte veces
    al día, de pie y con una mano. Lo que cambia la decisión de quien abre la
    app son números, no explicaciones. */
+#video{width:100%;border-radius:10px;background:#000;display:block;
+  aspect-ratio:4/3;object-fit:cover}
+#lienzo{display:none}
+.mira{position:relative}
+.mira::after{content:'';position:absolute;inset:18% 14%;border:2px solid #fff;
+  border-radius:10px;opacity:.55;pointer-events:none}
+
 .buscador{display:flex;gap:9px;margin-bottom:14px}
 .buscador input{flex:1}
 .buscador button{width:auto;padding:12px 18px;flex:0 0 auto}
@@ -374,6 +381,11 @@ details.mas>div{padding-top:11px}
 .prod .det .r.vence{color:var(--warn)}
 .prod .det .r.vencido{color:var(--crit)}
 </style>
+<!-- El lector de respaldo vive en el repositorio, no en un CDN: el almacen
+     tiene mala senal y la app se usa instalada. Sin jsQR el escaner sigue
+     funcionando en Android (BarcodeDetector nativo) y siempre queda la
+     opcion de teclear el folio. -->
+<script src="jsQR.js" defer onerror="window.__sinJsQR=true"></script>
 </head>
 <body>
 
@@ -414,6 +426,10 @@ var CAT_KEY = 'msu_alm_cat';
 var estado = {
   sesion: leer(SES_KEY, null),
   cat: leer(CAT_KEY, null),
+  /* La camara del escaner. Vive en estado y no en la pantalla porque hay
+     que poder apagarla desde fuera: una camara encendida que nadie ve
+     calienta el telefono y se come la pila. */
+  stream: null,
   cabecera: null,
   lineas: [],
   /* La huella de ESTA recepción. Se genera una sola vez, al abrir la
@@ -708,6 +724,117 @@ function dondeEsta(x) {
   return 'anaquel';
 }
 
+/* =================================================================
+   Escanear
+   =================================================================
+   El folio impreso en la etiqueta es la identidad del lote. Leerlo con la
+   camara es la diferencia entre buscar un insumo en treinta segundos y
+   buscarlo en tres, y es lo unico que hace que valga la pena pegar las
+   etiquetas.
+
+   Tres caminos, en orden de preferencia, igual que en la app de activos:
+     1. BarcodeDetector nativo  -> Chrome de Android, sin dependencias.
+     2. jsQR.js del propio repo -> iPhone/Safari y cualquier navegador viejo.
+     3. Teclear el folio        -> siempre disponible.
+   ================================================================= */
+
+/* Lo leido no siempre es un folio nuestro. En el anaquel conviven tres
+   codigos: el que imprimimos (LOT-…), el de una caja de cirugia (CAJA-…)
+   y el que trae de fabrica el producto. Cada uno va a su pantalla; el de
+   fabrica se manda al buscador, que ya sabe buscar por lote del
+   proveedor, por clave y por nombre. */
+function abrirEscaneado(txt) {
+  var v = String(txt || '').trim().toUpperCase();
+  if (!v) return pantallaInicio();
+  if (/^CAJA-/.test(v)) return pantallaCajaDetalle(v);
+  if (/^LOT-/.test(v)) return pantallaLote(v, function () { pantallaInicio(); });
+  return pantallaLotes(v);
+}
+
+function detenerCamara() {
+  if (estado.stream) {
+    estado.stream.getTracks().forEach(function (t) { t.stop(); });
+    estado.stream = null;
+  }
+}
+
+async function pantallaEscaner() {
+  encabezado('Escanear', 'Apunta al c\u00f3digo de la etiqueta');
+  pintar(
+    '<div class="card mira"><video id="video" playsinline muted autoplay></video>' +
+    '<canvas id="lienzo"></canvas>' +
+    '<p class="mini centro" id="msgEsc">Abriendo c\u00e1mara\u2026</p></div>' +
+    '<button class="b-ghost" id="bTeclear">Teclear el folio</button>' +
+    '<button class="b-ghost" id="bVolverEsc">Volver</button>');
+
+  $('bTeclear').onclick = function () { detenerCamara(); pantallaLotes(''); };
+  $('bVolverEsc').onclick = function () { detenerCamara(); pantallaInicio(); };
+
+  var hayNativo = ('BarcodeDetector' in window);
+  var hayJsQR = (typeof window.jsQR === 'function');
+
+  if (!hayNativo && !hayJsQR) {
+    $('msgEsc').textContent = 'Este navegador no puede leer c\u00f3digos. ' +
+      'Usa \u00abTeclear el folio\u00bb.';
+    return;
+  }
+
+  var v = $('video');
+  try {
+    estado.stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' } }, audio: false
+    });
+    v.srcObject = estado.stream;
+    v.setAttribute('playsinline', 'true');   /* iOS: sin esto abre a pantalla completa */
+    await v.play();
+  } catch (e) {
+    $('msgEsc').textContent = 'No se pudo abrir la c\u00e1mara. Dale permiso al sitio ' +
+      'o teclea el folio. En iPhone hace falta iOS 14.3 o posterior.';
+    return;
+  }
+
+  $('msgEsc').textContent = 'Buscando c\u00f3digo\u2026';
+
+  var detector = hayNativo
+    ? new window.BarcodeDetector({ formats: ['qr_code', 'code_128', 'code_39'] })
+    : null;
+  var lienzo = $('lienzo');
+  var ctx = lienzo.getContext('2d', { willReadFrequently: true });
+  var buscando = true;
+
+  function encontrado(valor) {
+    buscando = false;
+    detenerCamara();
+    if (navigator.vibrate) navigator.vibrate(60);
+    abrirEscaneado(valor);
+  }
+
+  (async function bucle() {
+    while (buscando && estado.stream) {
+      /* Si la pantalla ya no esta, alguien navego a otra parte sin pasar
+         por los botones: se apaga la camara sola. */
+      if (!document.getElementById('video')) { detenerCamara(); return; }
+      try {
+        if (detector) {
+          var codigos = await detector.detect(v);
+          if (codigos && codigos.length) return encontrado(codigos[0].rawValue);
+        } else if (v.videoWidth) {
+          /* Se reduce el fotograma: decodificar en tama\u00f1o completo tumba a
+             los telefonos modestos. */
+          var ancho = 480;
+          var alto = Math.round(v.videoHeight * (ancho / v.videoWidth));
+          lienzo.width = ancho; lienzo.height = alto;
+          ctx.drawImage(v, 0, 0, ancho, alto);
+          var img = ctx.getImageData(0, 0, ancho, alto);
+          var r = window.jsQR(img.data, ancho, alto, { inversionAttempts: 'dontInvert' });
+          if (r && r.data) return encontrado(r.data);
+        }
+      } catch (e) { /* fotograma ilegible: seguimos */ }
+      await new Promise(function (res) { setTimeout(res, detector ? 220 : 120); });
+    }
+  })();
+}
+
 function pantallaInicio() {
   encabezado('Almacén', estado.sesion ? estado.sesion.nombre : '');
   var c = estado.cat || { catalogo: [], almacenes: [] };
@@ -716,6 +843,7 @@ function pantallaInicio() {
   pintar(
     '<div class="buscador">' +
     '<input id="qBusca" placeholder="Busca un insumo…" autocomplete="off">' +
+    '<button class="b-dark" id="bEscan">Escanear</button>' +
     '<button class="b-dark" id="bBuscar">Buscar</button></div>' +
 
     '<div id="tablero"></div>' +
@@ -773,6 +901,7 @@ function pantallaInicio() {
     var q = ($('qBusca').value || '').trim();
     pantallaExistencias(q);
   }
+  $('bEscan').onclick = function () { pantallaEscaner(); };
   $('bBuscar').onclick = buscar;
   $('qBusca').onkeydown = function (e) { if (e.key === 'Enter') buscar(); };
 
