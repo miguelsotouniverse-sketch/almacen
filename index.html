@@ -886,8 +886,10 @@ function pantallaInicio() {
     '<button class="baldosa" id="bSinFecha">Folios sin caducidad</button>' +
     '<button class="baldosa" id="bActivos">Activos fijos</button>' +
     (puedeVerCostos()
-      ? '<button class="baldosa" id="bCostos">Qué costó cada cirugía<span class="q">Costo directo de material</span></button>' +
-        '<button class="baldosa" id="bCostear">Lotes por costear<span class="q">Los que entraron sin precio</span></button>'
+      ? '<button class="baldosa" id="bCostos">Qué costó cada cirugía<span class="q">Costo directo de material</span></button>'
+      : '') +
+    (puedeCostear()
+      ? '<button class="baldosa" id="bCostear">Lotes por costear<span class="q">Los que entraron sin precio</span></button>'
       : '') +
     (esDir ? '<button class="baldosa" id="bUsuarios">Usuarios y ubicaciones</button>' +
              '<button class="baldosa" id="bAnular">Anular recepción</button>' +
@@ -1930,6 +1932,17 @@ async function pantallaDotacionEditar(ubic) {
 function puedeVerCostos() {
   var r = String(estado.sesion && estado.sesion.rol).toUpperCase();
   return r === 'DIRECTOR' || r === 'GERENCIA';
+}
+
+/* Capturar precios no es lo mismo que ver el margen.
+   Transcribir una factura es trabajo operativo y lo hace quien recibe el
+   material; lo que cost\u00f3 cada cirug\u00eda es informaci\u00f3n de direcci\u00f3n. Por
+   eso regulatorio entra a «Lotes por costear» y no a «Qu\u00e9 cost\u00f3 cada
+   cirug\u00eda». El gateway aplica la misma regla, as\u00ed que esconder el mosaico
+   no es el candado: es que el candado tambi\u00e9n se vea. */
+function puedeCostear() {
+  var r = String(estado.sesion && estado.sesion.rol).toUpperCase();
+  return r === 'DIRECTOR' || r === 'GERENCIA' || r === 'REGULATORIO';
 }
 
 /* Pesos con separador de miles. Un costo sin formato se lee mal y se teclea
