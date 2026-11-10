@@ -307,6 +307,10 @@ label.check input{width:19px;height:19px;margin:1px 0 0;flex:0 0 auto;accent-col
   border-radius:10px;opacity:.55;pointer-events:none}
 
 .buscador{display:flex;gap:9px;margin-bottom:14px}
+/* Un campo de busqueda con su boton de escanear al lado. El boton no lleva
+   el ancho completo que tienen los demas botones. */
+.campo-escan{display:grid;grid-template-columns:1fr auto;gap:9px;align-items:stretch}
+.campo-escan button{width:auto;margin-top:0;padding:14px 16px;white-space:nowrap}
 .buscador input{flex:1}
 .buscador button{width:auto;padding:12px 18px;flex:0 0 auto}
 
@@ -758,17 +762,30 @@ function detenerCamara() {
   }
 }
 
-async function pantallaEscaner() {
-  encabezado('Escanear', 'Apunta al c\u00f3digo de la etiqueta');
+/* El motor de la camara, separado de la pantalla que lo usa.
+   La portada lo usa para navegar a una ficha; al surtir una caja se usa sin
+   salir de la pantalla, para no volver a pedir las existencias entre un
+   renglon y el siguiente.
+
+   op.alLeer(texto)  -> que hacer con el codigo leido.
+   op.alCancelar()   -> a donde ir si la persona se arrepiente.
+   op.alTeclear()    -> si se pasa, aparece el boton de teclear el folio. */
+async function leerCodigo(op) {
+  op = op || {};
+  var alLeer = op.alLeer || abrirEscaneado;
+  var alCancelar = op.alCancelar || function () { pantallaInicio(); };
+  var alTeclear = op.alTeclear || null;
+
+  encabezado(op.titulo || 'Escanear', op.nota || 'Apunta al c\u00f3digo de la etiqueta');
   pintar(
     '<div class="card mira"><video id="video" playsinline muted autoplay></video>' +
     '<canvas id="lienzo"></canvas>' +
     '<p class="mini centro" id="msgEsc">Abriendo c\u00e1mara\u2026</p></div>' +
-    '<button class="b-ghost" id="bTeclear">Teclear el folio</button>' +
-    '<button class="b-ghost" id="bVolverEsc">Volver</button>');
+    (alTeclear ? '<button class="b-ghost" id="bTeclear">Teclear el folio</button>' : '') +
+    '<button class="b-ghost" id="bVolverEsc">' + esc(op.volverTxt || 'Volver') + '</button>');
 
-  $('bTeclear').onclick = function () { detenerCamara(); pantallaLotes(''); };
-  $('bVolverEsc').onclick = function () { detenerCamara(); pantallaInicio(); };
+  if (alTeclear) $('bTeclear').onclick = function () { detenerCamara(); alTeclear(); };
+  $('bVolverEsc').onclick = function () { detenerCamara(); alCancelar(); };
 
   var hayNativo = ('BarcodeDetector' in window);
   var hayJsQR = (typeof window.jsQR === 'function');
@@ -806,7 +823,7 @@ async function pantallaEscaner() {
     buscando = false;
     detenerCamara();
     if (navigator.vibrate) navigator.vibrate(60);
-    abrirEscaneado(valor);
+    alLeer(valor);
   }
 
   (async function bucle() {
@@ -833,6 +850,15 @@ async function pantallaEscaner() {
       await new Promise(function (res) { setTimeout(res, detector ? 220 : 120); });
     }
   })();
+}
+
+/* El escaner de la portada: lee y navega a donde corresponda. */
+async function pantallaEscaner() {
+  return leerCodigo({
+    alLeer: abrirEscaneado,
+    alTeclear: function () { pantallaLotes(''); },
+    alCancelar: function () { pantallaInicio(); }
+  });
 }
 
 function pantallaInicio() {
@@ -3577,7 +3603,8 @@ async function pantallaCajaDetalle(cajaId) {
  */
 async function pantallaCajaMover(cajaId, sentido) {
   var esSalida = sentido !== 'RETORNO';
-  encabezado(esSalida ? 'Sacar material' : 'Registrar retorno', cajaId);
+  var tituloPant = esSalida ? 'Sacar material' : 'Registrar retorno';
+  encabezado(tituloPant, cajaId);
   /* La lista trae los dos almacenes y CEyE. Lo que no está en el almacén de
      la caja viene marcado con dónde está, para no caminar a ciegas. */
   pintar('<div class="card"><p class="sub">Cargando…</p></div>');
@@ -3622,6 +3649,8 @@ async function pantallaCajaMover(cajaId, sentido) {
   }
 
   var lineas = [];
+  /* Lo ultimo que leyo la camara, pendiente de aplicarse al volver a pintar. */
+  var escaneado = null;
 
   function opciones(filtro) {
     var f = String(filtro || '').toLowerCase();
@@ -3637,7 +3666,61 @@ async function pantallaCajaMover(cajaId, sentido) {
     }).join('');
   }
 
+  /* El QR de la etiqueta trae el folio del lote y nada mas. Puede pasar que
+     ese folio no este disponible aqui, y eso hay que decirlo con nombre y
+     apellido: una lista que se queda vacia sin explicacion es lo que hace
+     que la gente deje de escanear y vuelva a teclear. */
+  function aplicarEscaneo(txt) {
+    var v = String(txt || '').trim();
+    var V = v.toUpperCase();
+    var filtro = $('mFiltro'), lista = $('mLote'), eco = $('mEcoEsc');
+    if (!filtro || !lista || !eco) return;
+
+    if (/^CAJA-/.test(V)) {
+      eco.className = 'aviso a-warn';
+      eco.textContent = 'Eso es la etiqueta de una caja (' + v + '), no la de un ' +
+        'insumo. Escanea el folio pegado al empaque.';
+      return;
+    }
+
+    filtro.value = v;
+    lista.innerHTML = opciones(v);
+
+    var hay = null;
+    disponibles.forEach(function (d) {
+      if (!hay && String(d.lote_id).toUpperCase() === V) hay = d;
+    });
+
+    if (hay) {
+      for (var i = 0; i < lista.options.length; i++) {
+        if (lista.options[i].value === hay.lote_id) { lista.selectedIndex = i; break; }
+      }
+      eco.className = 'aviso a-ok';
+      eco.textContent = hay.nombre + ' \u00b7 hay ' + hay.disponible +
+        (hay.ubic_nombre && !hay.propio ? ' en ' + hay.ubic_nombre : '') +
+        '. Pon la cantidad.';
+      if ($('mCant')) $('mCant').focus();
+      return;
+    }
+
+    eco.className = 'aviso a-warn';
+    if (lista.options.length) {
+      eco.textContent = 'Ese folio no esta disponible aqui, pero el codigo se qued\u00f3 ' +
+        'en el buscador por si lo reconoces en la lista.';
+    } else if (/^LOT-/.test(V)) {
+      eco.textContent = esSalida
+        ? 'El folio ' + v + ' no tiene existencia en ning\u00fan almac\u00e9n: ya sali\u00f3, ' +
+          'est\u00e1 en otra caja o se dio de baja.'
+        : 'El folio ' + v + ' no est\u00e1 en esta caja, as\u00ed que no hay nada que regresar.';
+    } else {
+      eco.textContent = 'No encontr\u00e9 ese c\u00f3digo. Puede ser el del fabricante, que ' +
+        'no es el folio nuestro: ese va en la etiqueta que imprimimos.';
+    }
+  }
+
   function dibujar() {
+    /* Se repone el encabezado porque el escaner lo cambia mientras lee. */
+    encabezado(tituloPant, cajaId);
     var capturado = lineas.map(function (l, i) {
       return '<div class="linea"><div class="cab"><div>' +
         '<div class="nm">' + esc(l.nombre) + '</div>' +
@@ -3657,7 +3740,12 @@ async function pantallaCajaMover(cajaId, sentido) {
         ? 'Esto no descuenta nada: el material cambia de lugar, no desaparece. Se descuenta al cerrar la caja.'
         : 'Lo que regresa vuelve a estar disponible en el anaquel. Lo que no regrese cuenta como consumido.') +
       '</p>' +
-      '<div class="campo"><label>Buscar</label><input id="mFiltro" placeholder="Nombre, código o folio de lote"></div>' +
+      '<div class="campo"><label>Buscar</label>' +
+        '<div class="campo-escan">' +
+          '<input id="mFiltro" placeholder="Nombre, código o folio de lote">' +
+          '<button class="b-dark" id="mEscan">Escanear</button>' +
+        '</div></div>' +
+      '<div id="mEcoEsc"></div>' +
       '<div class="campo"><label>Lote</label><select id="mLote">' + opciones('') + '</select></div>' +
       '<div class="campo"><label>Cantidad</label><input id="mCant" type="number" inputmode="decimal" min="0" step="any"></div>' +
       '<button class="b-dark" id="mAdd">Agregar renglón</button></div>' +
@@ -3673,6 +3761,20 @@ async function pantallaCajaMover(cajaId, sentido) {
     $('mFiltro').oninput = function () {
       $('mLote').innerHTML = opciones(this.value);
     };
+
+    /* La camara toma la pantalla, pero no la informacion: al volver, dibujar()
+       repinta con las existencias y los renglones que ya estaban en memoria. */
+    $('mEscan').onclick = function () {
+      leerCodigo({
+        titulo: esSalida ? 'Escanear para sacar' : 'Escanear para regresar',
+        nota: cajaId,
+        volverTxt: 'Cancelar',
+        alCancelar: dibujar,
+        alLeer: function (txt) { escaneado = txt; dibujar(); }
+      });
+    };
+
+    if (escaneado) { aplicarEscaneo(escaneado); escaneado = null; }
 
     Array.prototype.forEach.call(document.querySelectorAll('.quitar'), function (b) {
       b.onclick = function () {
