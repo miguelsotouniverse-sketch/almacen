@@ -3525,7 +3525,12 @@ async function pantallaCajaDetalle(cajaId) {
         '<button class="b-primary" id="bSacar">Sacar material</button>' +
         '<button class="b-dark" id="bRegresar"' + (dentro.length ? '' : ' disabled') + '>Registrar retorno</button>' +
         '</div>' +
-        '<button class="b-dark" id="bCerrar"' + (dentro.length ? '' : ' disabled') + '>Cerrar la caja y hacer el corte</button>') +
+        /* Sin candado por estar vacia: una caja sin nada dentro es la que ya
+           termino, o la que se abrio por error. Dejarla sin boton era
+           condenarla a quedarse abierta para siempre. */
+        '<button class="b-dark" id="bCerrar">' +
+        (dentro.length ? 'Cerrar la caja y hacer el corte' : 'Cerrar la caja') +
+        '</button>') +
 
     bloqueControlados(r.controlados || [], cerrada, cajaId) +
 
@@ -3621,9 +3626,26 @@ async function pantallaCajaMover(cajaId, sentido) {
       var e = await enviar({ accion: 'existencias' }, true);
       if (!e.ok) return pintar('<div class="aviso a-err">' + esc(e.error) + '</div>');
       var dela = String(caja.almacen || '').toUpperCase();
+
+      /* La sede del almacén de la caja. Un almacén de otra unidad no surte
+         esta cirugía: el saldo cuadraría igual, pero sería material de otra
+         empresa cargado a un paciente de ésta, y eso no se nota hasta que
+         alguien revisa los costos meses después. El surtido automático ya
+         filtraba por sede; esta pantalla no, y mientras todos los almacenes
+         fueron de Zorvix nadie lo notó. */
+      var sedeCaja = '';
+      e.existencias.forEach(function (x) {
+        if (String(x.ubic_id).toUpperCase() === dela) sedeCaja = String(x.sede || '').toUpperCase();
+      });
+
       disponibles = e.existencias.filter(function (x) {
         var t = String(x.ubic_tipo || '').toUpperCase();
-        return t === 'ALMACEN' || t === 'CLINICA';
+        if (t !== 'ALMACEN' && t !== 'CLINICA') return false;
+        /* Si no se sabe la sede de alguno de los dos, no se filtra: más vale
+           ofrecer de más que esconder material que sí se puede usar. */
+        var s = String(x.sede || '').toUpperCase();
+        if (!sedeCaja || !s) return true;
+        return s === sedeCaja;
       }).map(function (x) {
         return { sku: x.sku, lote_id: x.lote_id, nombre: x.nombre,
                  caducidad: x.caducidad, disponible: x.cantidad,
@@ -3877,15 +3899,29 @@ function pantallaCajaCerrar(cajaId) {
       '<select class="dest" data-k="' + esc(k) + '">' + opt + '</select></div>';
   }
 
+  /* Una caja vacia no tiene consumo que repartir, asi que no se le pide a
+     nadie que clasifique nada: se dice en una linea que no se va a descontar
+     nada y se cierra. */
+  var vacia = !dentro.length;
+
   pintar(
-    '<div class="card"><h3>' + dentro.length + ' renglón(es) de consumo</h3>' +
-    '<p class="sub">Esto es lo que salió menos lo que regresó. No se captura: ya está calculado.</p>' +
-    '<p class="mini">El destino viene propuesto por el catálogo — los implantes, energías, hilos y hialurónicos salen como excedente. Cambia solo lo que sea excepción, y marca merma en lo que se echó a perder.</p>' +
-    dentro.map(bloque).join('') + '</div>' +
+    (vacia
+      ? '<div class="card"><h3>No hay nada que descontar</h3>' +
+        '<p class="sub">Esta caja no trae material encima: o todo regresó al almacén, ' +
+        'o nunca se le sacó nada. Al cerrarla no se mueve ninguna existencia.</p>' +
+        '<p class="mini">Queda registrada como cerrada, con la fecha y con quién la cerró. ' +
+        'Si fue una caja abierta por error, conviene decirlo en la nota.</p></div>'
+      : '<div class="card"><h3>' + dentro.length + ' renglón(es) de consumo</h3>' +
+        '<p class="sub">Esto es lo que salió menos lo que regresó. No se captura: ya está calculado.</p>' +
+        '<p class="mini">El destino viene propuesto por el catálogo — los implantes, energías, hilos y hialurónicos salen como excedente. Cambia solo lo que sea excepción, y marca merma en lo que se echó a perder.</p>' +
+        dentro.map(bloque).join('') + '</div>') +
 
     '<div class="card"><h3>Nota del cierre</h3>' +
-    '<p class="mini">Si algo no cuadró, escríbelo aquí tal cual. El cierre se puede guardar con una diferencia registrada; lo que no se vale es inventar una cifra para poder avanzar.</p>' +
-    '<textarea id="cNota" rows="3" placeholder="Opcional"></textarea></div>' +
+    '<p class="mini">' + (vacia
+      ? 'Por qué se cierra vacía. Si se abrió por error, escríbelo aquí: es lo único que va a explicar después por qué existe esta caja sin consumo.'
+      : 'Si algo no cuadró, escríbelo aquí tal cual. El cierre se puede guardar con una diferencia registrada; lo que no se vale es inventar una cifra para poder avanzar.') + '</p>' +
+    '<textarea id="cNota" rows="3" placeholder="' +
+      (vacia ? 'Por ejemplo: se abrió por error' : 'Opcional') + '"></textarea></div>' +
 
     '<button class="b-primary" id="bOk">Cerrar la caja</button>' +
     '<button class="b-ghost" id="bV">Volver sin cerrar</button>');
@@ -3895,8 +3931,10 @@ function pantallaCajaCerrar(cajaId) {
   });
 
   $('bOk').onclick = async function () {
-    if (!confirm('Al cerrar, ' + dentro.length + ' renglón(es) se descuentan contra ' +
-                 r.caja.paciente + '. Esto no se deshace desde la app. ¿Cerrar?')) return;
+    if (!confirm(vacia
+          ? 'Esta caja se cierra sin descontar nada. Esto no se deshace desde la app. ¿Cerrar?'
+          : 'Al cerrar, ' + dentro.length + ' renglón(es) se descuentan contra ' +
+            r.caja.paciente + '. Esto no se deshace desde la app. ¿Cerrar?')) return;
     this.disabled = true; this.textContent = 'Cerrando…';
     try {
       var res = await enviar({
@@ -3909,7 +3947,9 @@ function pantallaCajaCerrar(cajaId) {
       }
       var s = res.resumen || {};
       pintar('<div class="aviso a-ok">Caja ' + esc(cajaId) + ' cerrada. ' +
-        esc(res.renglones) + ' renglón(es) descontados.</div>' +
+        (res.renglones
+          ? esc(res.renglones) + ' renglón(es) descontados.'
+          : 'No se descontó nada: iba vacía.') + '</div>' +
         '<div class="card"><div class="lista">' +
         '<div class="item"><div class="l"><div>Excedente · se cobra</div></div><span class="pill p-warn">' + esc(s.EXCEDENTE || 0) + '</span></div>' +
         '<div class="item"><div class="l"><div>Incluido en el paquete</div></div><span class="pill p-neutral">' + esc(s.INCLUIDO || 0) + '</span></div>' +
