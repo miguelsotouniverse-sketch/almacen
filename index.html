@@ -2390,7 +2390,7 @@ function bloqueRecepciones(grupos) {
 /* ---------------- pantalla 1: escoger la factura ---------------- */
 
 async function pantallaFactura(recepcionId) {
-  encabezado('Precios de la factura', esc(recepcionId));
+  encabezado('Precios de la factura', esc(String(recepcionId).split(',').join(' + ')));
   pintar('<div class="card"><p class="sub" id="fEstado">Buscando la factura…</p>' +
          '<div id="fGoogle"></div></div>');
 
@@ -2415,7 +2415,7 @@ async function pantallaFactura(recepcionId) {
   var cab = r.recepcion;
   pintar(
     '<div class="card"><h3>' + esc(cab.proveedor || 'Sin proveedor') + '</h3>' +
-    '<p class="mini mono">' + esc(cab.recepcion_id) + ' · ' + esc(cab.fecha) + '</p>' +
+    '<p class="mini mono">' + esc(cab.etiqueta || cab.recepcion_id) + ' · ' + esc(cab.fecha) + '</p>' +
     '<p class="mini">' + cab.lineas + ' lote(s), ' + cab.sin_costo + ' sin precio. ' +
     'Escoge la factura que cubre esta entrada.</p></div>' +
 
@@ -2457,7 +2457,7 @@ async function pantallaFactura(recepcionId) {
 }
 
 function pintarFacturaManual(recepcionId, aviso) {
-  encabezado('Precios de la factura', esc(recepcionId));
+  encabezado('Precios de la factura', esc(String(recepcionId).split(',').join(' + ')));
   pintar(
     '<div class="aviso a-err">' + esc(aviso) + '</div>' +
     '<div class="card"><h3>Pegar el XML</h3>' +
@@ -2573,7 +2573,7 @@ function pintarEcoFactura() {
   var repetidos = Object.keys(usados).filter(function (k) { return usados[k] > 1; });
   var faltan = grupos.filter(function (g) { return !usados[g.sku]; });
 
-  encabezado('Precios de la factura', esc(FACT.recepcion_id));
+  encabezado('Precios de la factura', esc(r.recepcion.etiqueta || FACT.recepcion_id));
   pintar(
     '<div class="card"><h3>' + esc(f.emisor || f.rfc_emisor) + '</h3>' +
     '<p class="mini">' + esc(f.fecha) +
@@ -2612,6 +2612,27 @@ function pintarEcoFactura() {
         '. Esos lotes se quedan sin precio y se pueden capturar a mano.</div>'
       : '') +
 
+    /* La misma factura puede cubrir dos entradas: llegaron dos cajas y se
+       recibieron por separado. Si no se incluyen las dos, el importe del
+       concepto se divide entre menos piezas y el costo sale inflado. No se
+       juntan solas porque dos entradas del mismo proveedor el mismo día
+       también pueden ser dos facturas distintas. */
+    (r.hermanas && r.hermanas.length
+      ? '<div class="card"><h3>¿La factura cubre otra entrada?</h3>' +
+        '<p class="mini">Hay ' + r.hermanas.length + ' entrada(s) más de ' +
+        esc(r.recepcion.proveedor) + ' de esos días, también sin precio. Si esta misma ' +
+        'factura las cubre, inclúyelas: el importe tiene que repartirse entre las piezas ' +
+        'de todas, no entre las de una.</p>' +
+        r.hermanas.map(function (h) {
+          return '<div class="fila-lote"><span class="t">' +
+            '<span class="n">' + esc(h.recepcion_id) + '</span>' +
+            '<span class="c">' + esc(h.fecha) + ' · ' + h.lotes + ' lote(s) · ' +
+            h.piezas + ' pz</span></span>' +
+            '<button class="b-ghost" data-herm="' + esc(h.recepcion_id) +
+            '" style="width:auto;margin:0">Incluir</button></div>';
+        }).join('') + '</div>'
+      : '') +
+
     r.renglones.map(function (x) { return renglonConcepto(x, grupos); }).join('') +
 
     '<div class="card"><h3>Lo que se va a guardar</h3>' +
@@ -2629,6 +2650,13 @@ function pintarEcoFactura() {
     s.onchange = function () {
       FACT.asignado[Number(this.getAttribute('data-c'))] = this.value;
       pintarEcoFactura();
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('[data-herm]'), function (b) {
+    b.onclick = function () {
+      /* Se vuelve a leer con las dos entradas: el reparto lo rehace el
+         servidor con el mismo XML, no se parchan las cifras aquí. */
+      leerFactura(FACT.recepcion_id + ',' + this.getAttribute('data-herm'), FACT.fuente);
     };
   });
   $('fGuardar').onclick = guardarFactura;
