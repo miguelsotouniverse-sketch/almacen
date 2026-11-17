@@ -856,6 +856,295 @@ async function leerCodigo(op) {
   })();
 }
 
+/* =================================================================
+   Aplicar a paciente
+
+   Un almacén de inyectables no arma cajas: aplica. Esta pantalla es su
+   equivalente del «surtir y cerrar» de quirófano, pero sin caja de por
+   medio — se escoge la paciente, se escogen los lotes y se descuenta.
+
+   El lote se elige siempre explícito, nunca «el sistema escoge»: en un
+   inyectable el lote es lo que se anota en el expediente y lo que se
+   reporta si el fabricante saca una alerta. Lo que sí hace la app es
+   ponerle enfrente el que caduca primero.
+   ================================================================= */
+
+function ctxAplicacion() {
+  return (estado.cat && estado.cat.aplicacion) || { activa: false, exclusiva: false, ubicaciones: [] };
+}
+function aplicaActiva() { return !!ctxAplicacion().activa; }
+/* Exclusiva: todo su alcance aplica a paciente. Es la señal para esconder
+   las fichas de quirófano, no sólo para enseñar la suya. */
+function soloAplicacion() { return !!ctxAplicacion().exclusiva; }
+
+var APLIC = null;   // lo que se está capturando
+
+async function pantallaAplicar(ubicId) {
+  encabezado('Aplicar a paciente', 'Descontar del almacén');
+  pintar('<div class="card"><p class="sub">Cargando…</p></div>');
+
+  var ubic = ubicId || (ctxAplicacion().ubicaciones[0] || {}).ubic_id || '';
+  var r;
+  try {
+    r = await enviar({ accion: 'aplicacion_disponible', ubic_id: ubic }, true);
+  } catch (e) {
+    return pintar('<div class="aviso a-err">Sin conexión. Aplicar necesita señal, ' +
+      'porque valida contra la existencia real.</div>' +
+      '<button class="b-ghost" onclick="pantallaInicio()">Volver</button>');
+  }
+  if (!r.ok) return pintar('<div class="aviso a-err">' + esc(r.error) + '</div>' +
+    '<button class="b-ghost" onclick="pantallaInicio()">Volver</button>');
+
+  APLIC = { ubic_id: r.ubic_id, nombre: r.nombre, lotes: r.lotes,
+            pacientes: r.pacientes || [], lineas: [], client_id: idCliente() };
+  pintarAplicar('');
+}
+
+/** Lo que queda de un lote después de lo ya puesto en esta misma captura. */
+function restanteDe(loteId) {
+  var l = null;
+  APLIC.lotes.forEach(function (x) { if (x.lote_id === loteId) l = x; });
+  if (!l) return 0;
+  var usado = 0;
+  APLIC.lineas.forEach(function (x) { if (x.lote_id === loteId) usado += Number(x.cantidad); });
+  return Math.round((l.cantidad - usado) * 1000) / 1000;
+}
+
+function pintarAplicar(busca) {
+  var q = plano(busca || '');
+  var hay = APLIC.lotes.filter(function (x) {
+    if (restanteDe(x.lote_id) <= 0) return false;
+    if (!q) return true;
+    return plano(x.sku + ' ' + x.nombre + ' ' + x.lote_id + ' ' + (x.lote_proveedor || '')).indexOf(q) >= 0;
+  });
+
+  /* El que caduca primero de cada clave va marcado. No se impone: hay
+     razones legítimas para sacar otro, pero quien captura tiene que verlo.
+     Con un solo lote la marca sobra: no hay contra qué compararlo, y una
+     etiqueta que siempre aparece deja de leerse. */
+  var primero = {}, cuantos = {};
+  hay.forEach(function (x) {
+    cuantos[x.sku] = (cuantos[x.sku] || 0) + 1;
+    if (!x.caducidad) return;
+    if (!primero[x.sku] || x.caducidad < primero[x.sku]) primero[x.sku] = x.caducidad;
+  });
+
+  var puesto = APLIC.lineas.reduce(function (a, x) { return a + Number(x.cantidad); }, 0);
+
+  pintar(
+    '<div class="card"><h3>' + esc(APLIC.nombre) + '</h3>' +
+    '<p class="mini">Lo que se aplique aquí se descuenta de este almacén y queda a nombre de ' +
+    'la paciente, con su lote. No abre caja de cirugía ni genera cobro.</p>' +
+    '<div class="campo"><label>Paciente</label>' +
+    '<input id="aPac" list="aPacLista" autocomplete="off" placeholder="Nombre completo" value="' +
+      esc(APLIC.paciente || '') + '">' +
+    '<datalist id="aPacLista">' +
+      APLIC.pacientes.map(function (n) { return '<option value="' + esc(n) + '">'; }).join('') +
+    '</datalist></div>' +
+    '<p class="mini">Escríbelo igual que en el expediente. Si ya se le aplicó algo antes, ' +
+    'aparece en la lista al teclear las primeras letras — conviene escogerlo de ahí para que ' +
+    'el historial de esa paciente no quede partido en dos nombres.</p></div>' +
+
+    (APLIC.lineas.length
+      ? '<div class="card"><h3>' + APLIC.lineas.length + ' renglón(es) · ' +
+        puesto + ' pieza(s)</h3>' +
+        APLIC.lineas.map(function (x, i) {
+          return '<div class="fila-lote"><span class="t">' +
+            '<span class="n">' + esc(x.nombre) + ' · ' + x.cantidad + ' ' +
+              esc(x.cantidad === 1 ? x.unidad : plural(x.unidad)) + '</span>' +
+            '<span class="c">' + esc(x.lote_id) +
+              (x.caducidad ? ' · cad ' + esc(x.caducidad) : '') + '</span></span>' +
+            '<button class="b-ghost" data-quitar="' + i + '" style="width:auto;margin:0">Quitar</button>' +
+            '</div>';
+        }).join('') + '</div>'
+      : '') +
+
+    '<div class="card"><h3>Agregar</h3>' +
+    '<div class="buscador">' +
+    '<input id="aBusca" placeholder="Busca el insumo o escanea…" autocomplete="off" value="' +
+      esc(busca || '') + '">' +
+    '<button class="b-dark" id="aEscan">Escanear</button></div>' +
+    (hay.length
+      ? hay.slice(0, 40).map(function (x) {
+          var urge = x.caducidad && x.caducidad === primero[x.sku] && cuantos[x.sku] > 1;
+          return '<div class="fila-lote"><span class="t">' +
+            '<span class="n">' + esc(x.nombre) + '</span>' +
+            '<span class="c">' + esc(x.lote_id) + ' · quedan ' + restanteDe(x.lote_id) +
+              ' ' + esc(plural(x.unidad)) +
+              (x.caducidad ? ' · cad ' + esc(x.caducidad) : ' · sin caducidad') + '</span></span>' +
+            (x.controlado
+              ? '<span class="pill p-crit">libro</span>'
+              : (urge ? '<span class="pill p-warn">sale primero</span>' : '')) +
+            (x.controlado ? ''
+              : '<button class="b-dark" data-poner="' + esc(x.lote_id) +
+                '" style="width:auto;margin:0">Poner</button>') +
+            '</div>';
+        }).join('')
+      : '<p class="mini">' + (busca
+          ? 'Nada con eso en este almacén.'
+          : 'Este almacén no tiene existencia.') + '</p>') +
+    '</div>' +
+
+    '<div class="card"><h3>Nota</h3>' +
+    '<p class="mini">Opcional: el procedimiento, la zona, lo que haga falta para entender ' +
+    'después por qué salió esto.</p>' +
+    '<textarea id="aNota" rows="2" placeholder="Opcional">' + esc(APLIC.nota || '') + '</textarea></div>' +
+
+    '<button class="b-dark" id="aGuardar"' + (APLIC.lineas.length ? '' : ' disabled') +
+      '>Registrar la aplicación</button>' +
+    '<button class="b-ghost" id="aV">Volver sin guardar</button>');
+
+  function recordar() {
+    APLIC.paciente = $('aPac').value;
+    APLIC.nota = $('aNota').value;
+  }
+  $('aPac').oninput = recordar;
+  $('aNota').oninput = recordar;
+
+  var lanzar = function () { recordar(); pintarAplicar($('aBusca').value); };
+  $('aBusca').onkeydown = function (e) { if (e.key === 'Enter') lanzar(); };
+  $('aBusca').onchange = lanzar;
+  $('aEscan').onclick = function () {
+    recordar();
+    leerCodigo({
+      alLeer: function (txt) {
+        var folio = String(txt || '').trim().toUpperCase();
+        var existe = APLIC.lotes.some(function (x) { return x.lote_id === folio; });
+        pintarAplicar(existe ? folio : folio);
+        if (!existe) alertar('Ese folio no tiene existencia en este almacén.');
+      },
+      alTeclear: function () { pintarAplicar(''); },
+      alCancelar: function () { pintarAplicar($('aBusca') ? $('aBusca').value : ''); }
+    });
+  };
+
+  Array.prototype.forEach.call(document.querySelectorAll('[data-poner]'), function (b) {
+    b.onclick = function () {
+      recordar();
+      var loteId = this.getAttribute('data-poner');
+      var queda = restanteDe(loteId);
+      var txt = prompt('¿Cuántas piezas? Quedan ' + queda + '.', '1');
+      if (txt === null) return;
+      var cant = parseFloat(String(txt).trim());
+      if (!(cant > 0)) return alertar('La cantidad tiene que ser mayor que cero.');
+      if (cant - queda > 0.0001) return alertar('No alcanza: quedan ' + queda + '.');
+      var l = null;
+      APLIC.lotes.forEach(function (x) { if (x.lote_id === loteId) l = x; });
+      APLIC.lineas.push({ sku: l.sku, lote_id: l.lote_id, cantidad: cant,
+                          nombre: l.nombre, unidad: l.unidad, caducidad: l.caducidad });
+      pintarAplicar('');
+    };
+  });
+
+  Array.prototype.forEach.call(document.querySelectorAll('[data-quitar]'), function (b) {
+    b.onclick = function () {
+      recordar();
+      APLIC.lineas.splice(Number(this.getAttribute('data-quitar')), 1);
+      pintarAplicar($('aBusca') ? $('aBusca').value : '');
+    };
+  });
+
+  $('aGuardar').onclick = guardarAplicacion;
+  $('aV').onclick = function () { pantallaInicio(); };
+}
+
+async function guardarAplicacion() {
+  APLIC.paciente = $('aPac').value.trim();
+  APLIC.nota = $('aNota').value.trim();
+  if (!APLIC.paciente) return alertar('Falta el nombre de la paciente.');
+  if (!APLIC.lineas.length) return alertar('No has puesto nada.');
+
+  var piezas = APLIC.lineas.reduce(function (a, x) { return a + Number(x.cantidad); }, 0);
+  if (!confirm('Se van a descontar ' + piezas + ' pieza(s) de ' + APLIC.nombre +
+               ' a nombre de ' + APLIC.paciente + '. Esto no se deshace desde la app. ¿Registrar?')) return;
+
+  var b = $('aGuardar');
+  b.disabled = true; b.textContent = 'Registrando…';
+  var r;
+  try {
+    r = await enviar({ accion: 'aplicacion_guardar', ubic_id: APLIC.ubic_id,
+      paciente: APLIC.paciente, nota: APLIC.nota,
+      lineas: APLIC.lineas.map(function (x) {
+        return { sku: x.sku, lote_id: x.lote_id, cantidad: x.cantidad };
+      }), client_id: APLIC.client_id }, true);
+  } catch (e) {
+    b.disabled = false; b.textContent = 'Registrar la aplicación';
+    return alertar('No se registró: ' + e.message);
+  }
+  if (!r.ok) {
+    b.disabled = false; b.textContent = 'Registrar la aplicación';
+    return alertar(r.error);
+  }
+
+  encabezado('Aplicación registrada', esc(r.folio || ''));
+  pintar(
+    '<div class="aviso a-ok">' + (r.duplicado
+      ? 'Esa aplicación ya estaba registrada. No se descontó dos veces.'
+      : r.renglones + ' renglón(es) descontados de ' + esc(r.nombre_ubic) + '.') + '</div>' +
+    (r.duplicado ? '' :
+      '<div class="card"><h3>' + esc(r.paciente) + '</h3>' +
+      '<p class="mini mono">' + esc(r.folio) + ' · ' + esc(r.fecha) + '</p>' +
+      r.detalle.map(function (d) {
+        return '<div class="fila-lote"><span class="t">' +
+          '<span class="n">' + esc(d.nombre) + ' · ' + d.cantidad + ' ' +
+            esc(d.cantidad === 1 ? d.unidad : plural(d.unidad)) + '</span>' +
+          '<span class="c">' + esc(d.lote_id) +
+            (d.caducidad ? ' · cad ' + esc(d.caducidad) : '') + '</span></span></div>';
+      }).join('') + '</div>') +
+    '<button class="b-dark" onclick="pantallaAplicar()">Registrar otra</button>' +
+    '<button class="b-ghost" onclick="pantallaAplicaciones()">Ver las últimas</button>' +
+    '<button class="b-ghost" onclick="pantallaInicio()">Inicio</button>');
+}
+
+/* ---------------- la lista ---------------- */
+
+async function pantallaAplicaciones(filtro) {
+  encabezado('Aplicaciones', 'Qué se le aplicó a quién');
+  pintar('<div class="card"><p class="sub">Cargando…</p></div>');
+  var r;
+  try {
+    r = await enviar({ accion: 'aplicaciones_lista', paciente: filtro || '', limite: 40 }, true);
+  } catch (e) {
+    return pintar('<div class="aviso a-err">Sin conexión.</div>' +
+      '<button class="b-ghost" onclick="pantallaInicio()">Volver</button>');
+  }
+  if (!r.ok) return pintar('<div class="aviso a-err">' + esc(r.error) + '</div>' +
+    '<button class="b-ghost" onclick="pantallaInicio()">Volver</button>');
+
+  pintar(
+    '<div class="card"><div class="campo"><label>Buscar paciente</label>' +
+    '<input id="apQ" autocomplete="off" placeholder="Las primeras letras" value="' +
+      esc(filtro || '') + '"></div></div>' +
+    (r.aplicaciones.length
+      ? r.aplicaciones.map(function (g) {
+          return '<div class="card"><h3>' + esc(g.paciente) + '</h3>' +
+            '<p class="mini mono">' + esc(g.folio) + ' · ' + esc(g.fecha) +
+              ' · ' + esc(g.ubic_nombre) + '</p>' +
+            g.lineas.map(function (l) {
+              return '<div class="fila-lote"><span class="t">' +
+                '<span class="n">' + esc(l.nombre) + ' · ' + l.cantidad + ' ' +
+                  esc(l.cantidad === 1 ? l.unidad : plural(l.unidad)) + '</span>' +
+                '<span class="c">' + esc(l.lote_id) +
+                  (l.importe !== null && l.importe !== undefined ? ' · ' + pesos(l.importe) : '') +
+                  '</span></span></div>';
+            }).join('') +
+            (g.nota ? '<p class="mini">' + esc(g.nota) + '</p>' : '') +
+            (g.importe !== undefined
+              ? '<p class="mini"><b>' + pesos(g.importe) + '</b>' +
+                (g.completo ? '' : ' · falta el precio de algún lote') + '</p>'
+              : '') +
+            '</div>';
+        }).join('')
+      : '<div class="aviso a-info">' + (filtro
+          ? 'Nada con ese nombre.'
+          : 'Todavía no se ha registrado ninguna aplicación.') + '</div>') +
+    (aplicaActiva() ? '<button class="b-dark" onclick="pantallaAplicar()">Registrar una</button>' : '') +
+    '<button class="b-ghost" onclick="pantallaInicio()">Volver</button>');
+
+  $('apQ').onkeydown = function (e) { if (e.key === 'Enter') pantallaAplicaciones(this.value); };
+  $('apQ').onchange = function () { pantallaAplicaciones(this.value); };
+}
+
 /* El escaner de la portada: lee y navega a donde corresponda. */
 async function pantallaEscaner() {
   return leerCodigo({
@@ -882,17 +1171,35 @@ function pantallaInicio() {
     '<button class="baldosa fuerte ancha" id="bNueva">Nueva recepción' +
       '<span class="q">Todo lo que entra al almacén pasa por aquí</span></button>' +
     '<button class="baldosa" id="bExist">Existencias<span class="q">Qué hay y dónde</span></button>' +
-    '<button class="baldosa" id="bCajas">Cajas de cirugía<span class="q">Abrir, surtir, cerrar</span></button>' +
-    '<button class="baldosa" id="bArmar">¿Se puede armar?<span class="q">Plantilla contra existencia</span></button>' +
+
+    /* Donde el material se aplica a la paciente, lo de quirófano no existe:
+       no hay caja que abrir, ni plantilla que comparar, ni caso agendado del
+       cual armar. Enseñar esas tres fichas a quien lleva inyectables era
+       ofrecerle tres puertas que no llevan a ningún lado. */
+    (soloAplicacion() ? '' :
+      '<button class="baldosa" id="bCajas">Cajas de cirugía<span class="q">Abrir, surtir, cerrar</span></button>' +
+      '<button class="baldosa" id="bArmar">¿Se puede armar?<span class="q">Plantilla contra existencia</span></button>') +
+
+    (aplicaActiva()
+      ? '<button class="baldosa fuerte ancha" id="bAplicar">Aplicar a paciente' +
+        '<span class="q">Descontar lo que se le aplicó</span></button>' +
+        '<button class="baldosa" id="bAplics">Aplicaciones<span class="q">Qué se le aplicó a quién</span></button>'
+      : '') +
+
     (alcanceLimitado() ? '' :
       '<button class="baldosa" id="bCompra">Lista de compra<span class="q">Qué pedir</span></button>' +
       '<button class="baldosa" id="bDot">Carros y cajas selladas<span class="q">Urgencias</span></button>') +
     (puedeControlados()
       ? '<button class="baldosa" id="bLibro">Libro de controlados<span class="q">Lo que falta registrar</span></button>'
       : '') +
-    '<button class="baldosa" id="bAgenda">Agenda<span class="q">Armar desde el caso programado</span></button>' +
-    (alcanceLimitado() ? '' :
-      '<button class="baldosa" id="bCatalogo">Catálogo<span class="q">Qué es cada insumo</span></button>') +
+    (soloAplicacion() ? '' :
+      '<button class="baldosa" id="bAgenda">Agenda<span class="q">Armar desde el caso programado</span></button>') +
+
+    /* El catálogo sí le toca a todos. Antes se escondía a quien tiene un
+       solo almacén porque le salían las 319 claves del sistema; ahora sale
+       recortado a las suyas, que era el problema de fondo. */
+    '<button class="baldosa" id="bCatalogo">Catálogo<span class="q">' +
+      (catalogoRecortado() ? 'Lo que maneja este almacén' : 'Qué es cada insumo') + '</span></button>' +
     (['DIRECTOR','GERENCIA'].indexOf(String(estado.sesion && estado.sesion.rol).toUpperCase()) >= 0
       ? '<button class="baldosa ancha" id="bRevis">Por revisar' +
         '<span class="q">Consumo real contra lo que pedía la plantilla</span></button>' : '') +
@@ -942,12 +1249,15 @@ function pantallaInicio() {
     pantallaCabecera();
   };
   $('bExist').onclick = function () { pantallaExistencias(''); };
-  $('bCajas').onclick = function () { pantallaCajas(); };
-  $('bArmar').onclick = function () { pantallaSurtido(); };
+  /* Con guarda: estas fichas ya no están en todas las portadas. */
+  if ($('bCajas')) $('bCajas').onclick = function () { pantallaCajas(); };
+  if ($('bArmar')) $('bArmar').onclick = function () { pantallaSurtido(); };
+  if ($('bAplicar')) $('bAplicar').onclick = function () { pantallaAplicar(); };
+  if ($('bAplics')) $('bAplics').onclick = function () { pantallaAplicaciones(); };
   if ($('bCompra')) $('bCompra').onclick = function () { pantallaCompra(); };
   if ($('bDot')) $('bDot').onclick = function () { pantallaDotaciones(); };
   if ($('bLibro')) $('bLibro').onclick = function () { pantallaLibro(); };
-  $('bAgenda').onclick = function () { pantallaAgenda(); };
+  if ($('bAgenda')) $('bAgenda').onclick = function () { pantallaAgenda(); };
   if ($('bCatalogo')) $('bCatalogo').onclick = function () { pantallaCatalogo(''); };
   $('bPlant').onclick = function () { pantallaPlantillas(); };
   $('bLotes').onclick = function () { pantallaLotes(); };
@@ -1021,7 +1331,10 @@ function pintarTablero(t) {
     urgente.push({ n: t.dotaciones.no_listas, e: 'de ' + t.dotaciones.total + ' dotaciones incompletas',
                    c: 'd-crit', ir: 'dotaciones' });
   }
-  if (t.cajas_abiertas.length) {
+  /* Las cajas abiertas son de quien las surte. A quien lleva un almacén que
+     aplica a paciente le estaban saliendo las cajas de la otra sede: un
+     número rojo que no puede atender y que además no es de su clínica. */
+  if (t.cajas_abiertas.length && !soloAplicacion()) {
     urgente.push({ n: t.cajas_abiertas.length, e: 'caja(s) abierta(s)', c: 'd-warn', ir: 'cajas' });
   }
   if (t.caducidad.por_vencer && urgente.length < 3) {
@@ -1049,13 +1362,22 @@ function pintarTablero(t) {
     arriba += '<div class="aviso a-info">Todavía no se ha capturado ninguna entrada.</div>';
   }
 
+  /* «307 claves en cero» es el catálogo entero del sistema. Para quien
+     maneja diecinueve claves no es información: es un número grande que no
+     significa nada y que esconde al de al lado. Se cuenta sobre su propio
+     catálogo o no se enseña. */
+  var cero = t.existencia.en_cero;
+  var skusMios = (estado.cat && estado.cat.skus_alcance) || null;
+  if (skusMios) cero = Math.max(0, skusMios.length - t.existencia.con_saldo);
+
   var abajo = '<div class="tira">' +
     '<button class="dato" data-ir="existencias"><span class="n">' + t.existencia.con_saldo +
       '</span><span class="e">claves con existencia</span></button>' +
-    '<button class="dato" data-ir="cero"><span class="n">' + t.existencia.en_cero +
+    '<button class="dato" data-ir="cero"><span class="n">' + cero +
       '</span><span class="e">claves en cero</span></button>' +
-    '<button class="dato" data-ir="armar"><span class="n">' + t.plantillas.surtibles + '/' +
-      t.plantillas.total + '</span><span class="e">plantillas armables</span></button>' +
+    (soloAplicacion() ? '' :
+      '<button class="dato" data-ir="armar"><span class="n">' + t.plantillas.surtibles + '/' +
+      t.plantillas.total + '</span><span class="e">plantillas armables</span></button>') +
     '</div>';
 
   if ($('tablero')) $('tablero').innerHTML = arriba;
@@ -5490,9 +5812,24 @@ async function pantallaHomologarFolios() {
   };
 }
 
-function pantallaCatalogo(filtro) {
+/* Quien está limitado a un almacén ve el catálogo de ese almacén. No es
+   un filtro cosmético: el catálogo sirve para reconocer lo que se tiene en
+   la mano, y 300 claves de otra clínica entre las suyas convierten una
+   búsqueda de dos segundos en una de treinta. */
+function catalogoRecortado() {
+  var s = (estado.cat && estado.cat.skus_alcance) || null;
+  return !!(s && s.length);
+}
+
+function pantallaCatalogo(filtro, todo) {
   encabezado('Catálogo', 'Qué es cada cosa');
   var lista = ((estado.cat && estado.cat.catalogo) || []).slice();
+  var recorte = (!todo && catalogoRecortado()) ? estado.cat.skus_alcance : null;
+  if (recorte) {
+    var mios = {};
+    recorte.forEach(function (s) { mios[String(s).toUpperCase()] = true; });
+    lista = lista.filter(function (s) { return mios[String(s.sku).toUpperCase()]; });
+  }
   var q = plano(filtro || '');
   var vistos = q
     ? lista.filter(function (s) { return plano(s.sku + ' ' + s.nombre + ' ' + (s.presentacion || '')).indexOf(q) >= 0; })
@@ -5517,6 +5854,10 @@ function pantallaCatalogo(filtro) {
   }).join('');
 
   pintar(
+    (recorte
+      ? '<div class="card"><p class="mini">Las ' + lista.length + ' claves que maneja este ' +
+        'almacén. <a href="#" id="cTodo">Ver el catálogo completo</a> si vas a recibir algo nuevo.</p></div>'
+      : '') +
     '<div class="card">' +
     '<div class="campo"><label>Buscar</label>' +
     '<input id="cBusca" placeholder="Código, nombre o presentación" value="' + esc(filtro || '') + '"></div>' +
@@ -5543,18 +5884,24 @@ function pantallaCatalogo(filtro) {
 
     '<button class="b-ghost" id="bV">Volver al inicio</button>');
 
+  /* 'todo' viaja en cada vuelta: si alguien abrió el catálogo completo para
+     buscar una clave nueva, teclear no debe regresarlo al recorte. */
+  if ($('cTodo')) $('cTodo').onclick = function (e) {
+    e.preventDefault(); pantallaCatalogo(filtro, true);
+  };
+
   var caja = $('cBusca');
   caja.oninput = function () {
     var v = this.value, pos = this.selectionStart;
     clearTimeout(window.__tBusca);
     window.__tBusca = setTimeout(function () {
-      pantallaCatalogo(v);
+      pantallaCatalogo(v, todo);
       var n = $('cBusca'); if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (e) {} }
     }, 220);
   };
 
   Array.prototype.forEach.call(document.querySelectorAll('.fila-sku'), function (b) {
-    b.onclick = function () { pantallaSkuFicha(this.getAttribute('data-sku'), function () { pantallaCatalogo(filtro); }); };
+    b.onclick = function () { pantallaSkuFicha(this.getAttribute('data-sku'), function () { pantallaCatalogo(filtro, todo); }); };
   });
 
   /* Las miniaturas se traen una por una y sin bloquear la lista: si no hay
