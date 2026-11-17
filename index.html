@@ -633,6 +633,10 @@ async function entrarConGoogle(credencial) {
   var r = await enviar({ accion: 'login_google', idToken: credencial,
                          dispositivo: navigator.userAgent }, true);
   if (!r.ok) return pantallaLogin(r.error);
+  /* La credencial de Google se queda en memoria: la app de facturas la pide
+     para entregar el XML de un CFDI, y pedirsela a Google otra vez a media
+     captura es una pantalla de mas. Dura una hora, la que Google le da. */
+  guardarIdToken(credencial);
   // La identidad que firma cada movimiento es el correo verificado por Google,
   // no un nombre escrito a mano. La sesión la emite nuestro backend.
   estado.sesion = { sesion: r.sesion, usuario: r.correo || r.usuario,
@@ -2233,6 +2237,472 @@ function cablearCosto(k, unidad, getCant) {
   return pinta;
 }
 
+/* =================================================================
+   Traer los precios de la factura
+
+   El precio no se teclea: se lee del CFDI. La pantalla propone a qué
+   insumo corresponde cada concepto, muestra cuánto sale la pieza, y hasta
+   que alguien lo mira y confirma se guarda algo. El dinero nunca viaja
+   desde aquí hacia el servidor: lo único que se manda es la asignación
+   —este concepto es de estos lotes— y el gateway vuelve a sacar las cifras
+   del XML timbrado.
+   ================================================================= */
+
+/* El idToken de Google vive nada más en memoria y nada más una hora, que es
+   lo que Google le da. No se guarda en localStorage: una credencial que
+   sobrevive al cierre del navegador es una credencial que alguien más puede
+   encontrar. */
+var GTOKEN = { valor: null, exp: 0 };
+
+/* Pesos con los decimales que de verdad se van a guardar. pesos() redondea a
+   dos porque es lo que se lee en un total; un costo por pieza no: una caja de
+   100 a $142.80 da 1.428 exacto y enseñar $1.43 esconde el 2% de diferencia
+   que despues aparece en el costo del lote completo. */
+function pesosFinos(n) {
+  if (n === null || n === undefined || n === '') return '—';
+  var v = Number(n);
+  if (isNaN(v)) return '—';
+  var t = (Math.round(v * 10000) / 10000).toFixed(4).replace(/0+$/, '').replace(/\.$/, '.00');
+  var partes = t.split('.');
+  if (partes[1] && partes[1].length < 2) partes[1] += '0';
+  return '$' + partes[0].replace(/\B(?=(\d{3})+(?!\d))/g, ',') + '.' + (partes[1] || '00');
+}
+
+function guardarIdToken(cred) {
+  try {
+    var p = JSON.parse(atob(String(cred).split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+    GTOKEN = { valor: cred, exp: Number(p.exp) || 0 };
+  } catch (e) {
+    GTOKEN = { valor: cred, exp: Math.floor(Date.now() / 1000) + 1800 };
+  }
+}
+
+function idTokenVigente() {
+  if (!GTOKEN.valor) return null;
+  if (GTOKEN.exp && GTOKEN.exp < Date.now() / 1000 + 90) return null;
+  return GTOKEN.valor;
+}
+
+/**
+ * Pide a Google una credencial nueva sin salir de la pantalla.
+ *
+ * Hace falta porque la sesión del almacén dura treinta días y la de Google
+ * una hora: a media tarde el token con el que se entró ya no sirve para
+ * hablarle a la app de facturas. Se intenta en silencio y, si Google no
+ * contesta —hay navegadores donde el aviso automático no sale—, se deja el
+ * botón a la vista.
+ */
+function pedirIdToken(idContenedor) {
+  var ya = idTokenVigente();
+  if (ya) return Promise.resolve(ya);
+
+  return new Promise(function (ok, falla) {
+    (async function () {
+      try {
+        var cfg = await enviar({ accion: 'config_publica' }, true);
+        if (!cfg.ok || !cfg.google_activo) return falla(new Error('Falta configurar Google en el gateway.'));
+        await cargarGIS();
+        var resuelto = false;
+        google.accounts.id.initialize({
+          client_id: cfg.google_client_id,
+          callback: function (resp) {
+            if (resuelto) return;
+            resuelto = true;
+            guardarIdToken(resp.credential);
+            ok(resp.credential);
+          }
+        });
+        var caja = $(idContenedor);
+        if (caja) {
+          /* La pantalla decia «Buscando la factura...» mientras en realidad
+             esperaba a que alguien apretara un boton. */
+          var est = $('fEstado');
+          if (est) est.textContent = 'Primero, tu cuenta de Google.';
+          caja.innerHTML = '<p class="mini">Para leer la factura hace falta confirmar tu cuenta de ' +
+            'Google otra vez: la sesión del almacén dura treinta días y la de Google una hora.</p>' +
+            '<div id="gFact" class="g-caja"></div>';
+          google.accounts.id.renderButton($('gFact'), {
+            theme: 'outline', size: 'large', shape: 'pill', text: 'continue_with',
+            locale: 'es', width: 260
+          });
+        }
+        try { google.accounts.id.prompt(); } catch (e) {}
+      } catch (err) {
+        falla(err);
+      }
+    })();
+  });
+}
+
+/* ---------------- la entrada: por recepción ---------------- */
+
+/** Agrupa los lotes sin precio por la recepción con la que entraron. */
+function agruparPorRecepcion(lotes) {
+  var por = {}, orden = [];
+  lotes.forEach(function (l) {
+    var k = String(l.recepcion_id || '').trim().toUpperCase();
+    if (!k) return;                       // sin recepción no hay factura que buscar
+    if (!por[k]) {
+      por[k] = { recepcion_id: l.recepcion_id, proveedor: l.proveedor || '',
+                 fecha: l.fecha_recepcion || '', lotes: 0, piezas: 0,
+                 cirugias: 0, skus: {} };
+      orden.push(k);
+    }
+    por[k].lotes++;
+    por[k].piezas = Math.round((por[k].piezas + Number(l.cantidad_inicial || 0)) * 1000) / 1000;
+    por[k].cirugias += Number(l.cirugias || 0);
+    por[k].skus[l.sku] = true;
+    if (!por[k].proveedor && l.proveedor) por[k].proveedor = l.proveedor;
+  });
+  return orden.map(function (k) {
+    var g = por[k];
+    g.insumos = Object.keys(g.skus).length;
+    return g;
+  }).sort(function (a, b) {
+    if (a.cirugias !== b.cirugias) return b.cirugias - a.cirugias;
+    if (a.lotes !== b.lotes) return b.lotes - a.lotes;
+    return String(b.fecha).localeCompare(String(a.fecha));
+  });
+}
+
+function bloqueRecepciones(grupos) {
+  if (!grupos.length) return '';
+  return '<div class="card"><h3>Por factura</h3>' +
+    '<p class="mini">Cada renglón es una entrada de material. Si ya llegó el CFDI, ' +
+    'de ahí sale el precio: la app lo busca, propone a qué insumo corresponde cada ' +
+    'concepto y te enseña cuánto queda la pieza antes de guardar nada. ' +
+    'Nadie teclea cifras.</p></div>' +
+    grupos.map(function (g) {
+      return '<div class="card">' +
+        '<h3>' + esc(g.proveedor || 'Sin proveedor') + '</h3>' +
+        '<p class="mini mono">' + esc(g.recepcion_id) +
+          (g.fecha ? ' · ' + esc(g.fecha) : '') + '</p>' +
+        '<p class="mini">' + g.lotes + ' lote(s) sin precio · ' + g.insumos +
+          ' insumo(s) · ' + g.piezas + ' pz' + '</p>' +
+        (g.cirugias
+          ? '<p class="mini"><span class="pill p-crit">material ya usado en cirugía</span></p>'
+          : '') +
+        '<button class="b-dark" data-fact="' + esc(g.recepcion_id) + '">' +
+        'Traer precios de la factura</button></div>';
+    }).join('');
+}
+
+/* ---------------- pantalla 1: escoger la factura ---------------- */
+
+async function pantallaFactura(recepcionId) {
+  encabezado('Precios de la factura', esc(recepcionId));
+  pintar('<div class="card"><p class="sub" id="fEstado">Buscando la factura…</p>' +
+         '<div id="fGoogle"></div></div>');
+
+  var token;
+  try {
+    token = await pedirIdToken('fGoogle');
+  } catch (err) {
+    return pintarFacturaManual(recepcionId,
+      'No se pudo confirmar tu cuenta de Google. Puedes pegar el XML a mano.');
+  }
+
+  pintar('<div class="card"><p class="sub">Buscando la factura…</p></div>');
+  var r;
+  try {
+    r = await enviar({ accion: 'factura_candidatas', recepcion_id: recepcionId,
+                       id_token: token }, true);
+  } catch (err) {
+    return pintarFacturaManual(recepcionId, 'No se pudo consultar las facturas: ' + err.message);
+  }
+  if (!r.ok) return pintarFacturaManual(recepcionId, r.error);
+
+  var cab = r.recepcion;
+  pintar(
+    '<div class="card"><h3>' + esc(cab.proveedor || 'Sin proveedor') + '</h3>' +
+    '<p class="mini mono">' + esc(cab.recepcion_id) + ' · ' + esc(cab.fecha) + '</p>' +
+    '<p class="mini">' + cab.lineas + ' lote(s), ' + cab.sin_costo + ' sin precio. ' +
+    'Escoge la factura que cubre esta entrada.</p></div>' +
+
+    (r.candidatas.length
+      ? r.candidatas.map(function (c) {
+          return '<div class="card">' +
+            (c.ya_en_la_recepcion
+              ? '<p class="mini"><span class="pill p-ok">ya anotada en la recepción</span></p>'
+              : '') +
+            '<h3>' + esc(c.emisor || c.rfc) + '</h3>' +
+            '<p class="mini">' + esc(c.fecha) +
+              (c.folio ? ' · folio ' + esc(String(c.serie || '') + c.folio) : '') +
+              ' · ' + pesos(c.total) + '</p>' +
+            (c.conceptos ? '<p class="mini">' + esc(c.conceptos) + '</p>' : '') +
+            '<p class="mini mono">' + esc(c.uuid) + '</p>' +
+            '<button class="b-dark" data-uuid="' + esc(c.uuid) + '">Usar ésta</button></div>';
+        }).join('')
+      : '<div class="aviso a-info">De las ' + r.revisadas + ' facturas que hay en el ' +
+        'sistema, ninguna se parece a esta entrada: ni el proveedor ni la fecha. ' +
+        'Puede que todavía no la hayan subido, o que el material haya entrado con ' +
+        'otro nombre de proveedor.</div>') +
+
+    '<details class="mas"><summary>Pegar el XML a mano</summary><div>' +
+    '<p class="mini">Si la factura no está en el sistema, aquí se puede pegar el XML ' +
+    'tal cual. Es el mismo cálculo: lo que cambia es de dónde viene el archivo.</p>' +
+    '<div class="campo"><textarea id="fXml" rows="4" placeholder="&lt;cfdi:Comprobante …"></textarea></div>' +
+    '<button class="b-ghost" id="fPegado">Leer ese XML</button></div></details>' +
+    '<button class="b-ghost" id="fV">Volver</button>');
+
+  Array.prototype.forEach.call(document.querySelectorAll('[data-uuid]'), function (b) {
+    b.onclick = function () { leerFactura(recepcionId, { uuid: this.getAttribute('data-uuid') }); };
+  });
+  $('fPegado').onclick = function () {
+    var t = ($('fXml').value || '').trim();
+    if (!t) return alertar('Pega el XML de la factura.');
+    leerFactura(recepcionId, { xml: t });
+  };
+  $('fV').onclick = function () { pantallaPorCostear(); };
+}
+
+function pintarFacturaManual(recepcionId, aviso) {
+  encabezado('Precios de la factura', esc(recepcionId));
+  pintar(
+    '<div class="aviso a-err">' + esc(aviso) + '</div>' +
+    '<div class="card"><h3>Pegar el XML</h3>' +
+    '<p class="mini">Abre el XML de la factura y pégalo completo. El cálculo es el ' +
+    'mismo que cuando la app la trae sola.</p>' +
+    '<div class="campo"><textarea id="fXml" rows="6" placeholder="&lt;cfdi:Comprobante …"></textarea></div>' +
+    '<button class="b-dark" id="fPegado">Leer ese XML</button></div>' +
+    '<button class="b-ghost" id="fV">Volver</button>');
+  $('fPegado').onclick = function () {
+    var t = ($('fXml').value || '').trim();
+    if (!t) return alertar('Pega el XML de la factura.');
+    leerFactura(recepcionId, { xml: t });
+  };
+  $('fV').onclick = function () { pantallaPorCostear(); };
+}
+
+/* ---------------- pantalla 2: el eco, antes de guardar ---------------- */
+
+var FACT = null;   // lo último que se leyó, para poder reasignar sin volver a pedirlo
+
+async function leerFactura(recepcionId, fuente) {
+  pintar('<div class="card"><p class="sub">Leyendo la factura…</p></div>');
+  var pet = { accion: 'factura_leer', recepcion_id: recepcionId };
+  if (fuente.xml) pet.xml = fuente.xml;
+  else {
+    pet.uuid = fuente.uuid;
+    var t = idTokenVigente();
+    if (!t) {
+      try { t = await pedirIdToken(null); }
+      catch (e) { return pintarFacturaManual(recepcionId, 'Se venció la sesión de Google.'); }
+    }
+    pet.id_token = t;
+  }
+
+  var r;
+  try { r = await enviar(pet, true); }
+  catch (err) { return pintarFacturaManual(recepcionId, 'No se pudo leer: ' + err.message); }
+  if (!r.ok) return pintarFacturaManual(recepcionId, r.error);
+
+  FACT = { recepcion_id: recepcionId, fuente: fuente, datos: r,
+           asignado: {} };
+  r.renglones.forEach(function (x) { FACT.asignado[x.concepto] = x.sku || ''; });
+  pintarEcoFactura();
+}
+
+/** El renglón de un concepto: qué dice la factura, a qué insumo va, cuánto sale. */
+function renglonConcepto(x, grupos) {
+  var sku = FACT.asignado[x.concepto] || '';
+  var g = null;
+  grupos.forEach(function (y) { if (y.sku === sku) g = y; });
+  var porPieza = (g && g.piezas > 0) ? Math.round(x.neto / g.piezas * 10000) / 10000 : null;
+
+  var sello = x.aprendida
+    ? '<span class="pill p-ok">como la vez pasada</span>'
+    : (x.confianza === 'alta' ? '<span class="pill p-info">coincide</span>'
+      : (x.confianza === 'media' ? '<span class="pill p-warn">revísalo</span>'
+        : '<span class="pill p-crit">sin propuesta</span>'));
+
+  var ppu = (g && x.cantidad > 0) ? Math.round(g.piezas / x.cantidad * 1000) / 1000 : null;
+
+  return '<div class="card">' +
+    '<p class="mini">' + sello + '</p>' +
+    '<h3>' + esc(x.descripcion) + '</h3>' +
+    '<p class="mini">' + x.cantidad + ' ' + esc(x.unidad || '') + ' × ' +
+      pesos(x.valor_unitario) +
+      (x.descuento ? ' − ' + pesos(x.descuento) + ' de descuento' : '') +
+      ' = <b>' + pesos(x.neto) + '</b></p>' +
+    (x.clave_proveedor ? '<p class="mini mono">clave del proveedor: ' + esc(x.clave_proveedor) + '</p>' : '') +
+    '<div class="campo"><label>Es de este insumo</label>' +
+      '<select class="fSku" data-c="' + x.concepto + '">' +
+      '<option value="">— no es de esta entrada —</option>' +
+      grupos.map(function (y) {
+        return '<option value="' + esc(y.sku) + '"' + (y.sku === sku ? ' selected' : '') + '>' +
+          esc(y.nombre) + ' · ' + y.piezas + ' pz</option>';
+      }).join('') +
+      '</select></div>' +
+    (g
+      /* El por pieza se enseña con sus decimales de verdad: 60,000 entre 252
+         da 238.0952, y redondearlo a 238.10 en pantalla para luego guardar
+         otra cosa es mentirle a quien esta revisando. No se vuelve a
+         multiplicar por las piezas porque el total ya esta dos renglones
+         arriba -el de la factura- y el producto de la cifra redondeada
+         daria un centavo distinto, que se lee como un descuadre. */
+      ? '<p class="mini"><b>' + pesosFinos(porPieza) + ' por ' + esc(g.unidad) + '</b>' +
+        ' · ' + g.piezas + ' ' + esc(plural(g.unidad)) + ' recibidas' +
+        (ppu !== null && ppu !== 1
+          ? ' · cada ' + esc(x.unidad || 'unidad') + ' de la factura trae ' + ppu
+          : '') +
+        '</p>' +
+        (ppu !== null && ppu % 1 !== 0
+          ? '<p class="mini"><span class="pill p-warn">ojo</span> las piezas recibidas no ' +
+            'son múltiplo de lo facturado: puede que este concepto no sea de este insumo, ' +
+            'o que la recepción se haya capturado con otra cuenta.</p>'
+          : '')
+      : '<p class="mini">Sin insumo asignado, este concepto no pone precio a nada.</p>') +
+    '</div>';
+}
+
+function pintarEcoFactura() {
+  var r = FACT.datos, f = r.factura, grupos = r.grupos;
+
+  /* El cuadre se recalcula aquí porque las asignaciones se mueven a mano: lo
+     que importa no es lo que propuso el servidor, es lo que está en pantalla
+     en este momento. */
+  var asignado = 0, usados = {};
+  r.renglones.forEach(function (x) {
+    var s = FACT.asignado[x.concepto] || '';
+    if (!s) return;
+    asignado = Math.round((asignado + x.neto) * 1000) / 1000;
+    usados[s] = (usados[s] || 0) + 1;
+  });
+  var dif = Math.round((f.neto - asignado) * 100) / 100;
+  var repetidos = Object.keys(usados).filter(function (k) { return usados[k] > 1; });
+  var faltan = grupos.filter(function (g) { return !usados[g.sku]; });
+
+  encabezado('Precios de la factura', esc(FACT.recepcion_id));
+  pintar(
+    '<div class="card"><h3>' + esc(f.emisor || f.rfc_emisor) + '</h3>' +
+    '<p class="mini">' + esc(f.fecha) +
+      (f.folio ? ' · folio ' + esc(String(f.serie || '') + f.folio) : '') +
+      ' · ' + f.conceptos + ' concepto(s)</p>' +
+    (f.uuid ? '<p class="mini mono">' + esc(f.uuid) + '</p>' : '') +
+    (f.moneda && f.moneda !== 'MXN'
+      ? '<p class="mini"><span class="pill p-warn">' + esc(f.moneda) + '</span> ' +
+        'convertida a pesos al tipo de cambio de la factura (' + f.tipo_cambio + ').</p>'
+      : '') +
+    '<div class="item"><div class="l"><div>Subtotal menos descuentos</div></div>' +
+      '<span class="mono">' + pesos(f.neto) + '</span></div>' +
+    '<div class="item"><div class="l"><div>Asignado a esta entrada</div></div>' +
+      '<span class="mono">' + pesos(asignado) + '</span></div>' +
+    (Math.abs(dif) < 0.02
+      ? '<p class="mini"><span class="pill p-ok">cuadra</span> Cada peso de la factura ' +
+        'quedó repartido entre los insumos que entraron.</p>'
+      : '<p class="mini"><span class="pill p-warn">quedan ' + pesos(Math.abs(dif)) +
+        (dif > 0 ? ' sin asignar' : ' de más') + '</span> ' +
+        (dif > 0
+          ? 'Normal si la factura trae cosas que no entraron al almacén —flete, un ' +
+            'servicio, material de otra entrada—. Si no es el caso, falta asignar un concepto.'
+          : 'Hay más dinero asignado que lo que dice la factura: algún concepto está ' +
+            'puesto en el insumo equivocado.') + '</p>') +
+    '</div>' +
+
+    (repetidos.length
+      ? '<div class="aviso a-err">Hay dos conceptos apuntando al mismo insumo (' +
+        esc(repetidos.join(', ')) + '). Así se guardaría dos veces el mismo precio y ' +
+        'el último gana. Deja uno solo, o pégale el XML por partes.</div>'
+      : '') +
+
+    (faltan.length
+      ? '<div class="aviso a-info">Sin concepto asignado: ' +
+        esc(faltan.map(function (g) { return g.nombre; }).join(' · ')) +
+        '. Esos lotes se quedan sin precio y se pueden capturar a mano.</div>'
+      : '') +
+
+    r.renglones.map(function (x) { return renglonConcepto(x, grupos); }).join('') +
+
+    '<div class="card"><h3>Lo que se va a guardar</h3>' +
+    '<p class="mini">Se escribe el costo por pieza en cada lote de la entrada, se le ' +
+    'pone <b>FACTURA</b> como comprobante y se le anota el folio fiscal. Queda en la ' +
+    'bitácora del lote con el folio de la factura, y el costo de cada cirugía que ya ' +
+    'gastó de esos lotes se recalcula solo.</p>' +
+    '<p class="mini"><input type="checkbox" id="fPisar" style="width:auto;margin-right:7px">' +
+    '<span>Pisar los costos que ya estaban capturados</span></p>' +
+    '<button class="b-dark" id="fGuardar"' + (repetidos.length ? ' disabled' : '') +
+    '>Guardar los precios</button></div>' +
+    '<button class="b-ghost" id="fV">Volver sin guardar</button>');
+
+  Array.prototype.forEach.call(document.querySelectorAll('.fSku'), function (s) {
+    s.onchange = function () {
+      FACT.asignado[Number(this.getAttribute('data-c'))] = this.value;
+      pintarEcoFactura();
+    };
+  });
+  $('fGuardar').onclick = guardarFactura;
+  $('fV').onclick = function () { pantallaPorCostear(); };
+}
+
+async function guardarFactura() {
+  var r = FACT.datos, grupos = r.grupos;
+  var asigs = [];
+  r.renglones.forEach(function (x) {
+    var sku = FACT.asignado[x.concepto] || '';
+    if (!sku) return;
+    grupos.forEach(function (g) {
+      if (g.sku === sku) asigs.push({ concepto: x.concepto, lotes: g.lotes });
+    });
+  });
+  if (!asigs.length) return alertar('No hay ningún concepto asignado a un insumo.');
+
+  var pisar = $('fPisar').checked;
+  if (!confirm('Se va a escribir el precio de ' + asigs.length + ' concepto(s) en los ' +
+               'lotes de ' + FACT.recepcion_id + '. Queda en la bitácora. ¿Guardar?')) return;
+
+  var b = $('fGuardar');
+  b.disabled = true; b.textContent = 'Guardando…';
+
+  var pet = { accion: 'factura_aplicar', recepcion_id: FACT.recepcion_id,
+              asignaciones: asigs, sobrescribir: pisar ? 'SI' : '' };
+  if (FACT.fuente.xml) pet.xml = FACT.fuente.xml;
+  else {
+    pet.uuid = r.factura.uuid;
+    var t = idTokenVigente();
+    if (!t) {
+      try { t = await pedirIdToken(null); }
+      catch (e) { b.disabled = false; b.textContent = 'Guardar los precios';
+                  return alertar('Se venció la sesión de Google. Intenta otra vez.'); }
+    }
+    pet.id_token = t;
+  }
+
+  var res;
+  try { res = await enviar(pet, true); }
+  catch (err) {
+    b.disabled = false; b.textContent = 'Guardar los precios';
+    return alertar('No se guardó: ' + err.message);
+  }
+  if (!res.ok) {
+    b.disabled = false; b.textContent = 'Guardar los precios';
+    return alertar(res.error);
+  }
+
+  encabezado('Precios guardados', esc(res.recepcion_id));
+  pintar(
+    '<div class="aviso a-ok">' + res.lotes + ' lote(s) quedaron con precio. ' +
+    pesos(res.importe_total) + ' de la factura de ' + esc(res.emisor) + '.</div>' +
+    (res.saltados && res.saltados.length
+      ? '<div class="aviso a-info">' + res.saltados.length + ' lote(s) ya tenían precio y ' +
+        'se dejaron como estaban: ' + esc(res.saltados.join(', ')) + '</div>'
+      : '') +
+    '<div class="card"><h3>Lote por lote</h3>' +
+    res.detalle.map(function (d) {
+      return '<div class="fila-lote"><span class="t">' +
+        '<span class="n">' + esc(d.nombre) + '</span>' +
+        '<span class="c">' + esc(d.lote_id) + ' · ' + d.piezas + ' pz · ' +
+        pesos(d.costo_unitario) + ' c/u = ' + pesos(d.importe) + '</span></span></div>';
+    }).join('') + '</div>' +
+    (res.equivalencias
+      ? '<div class="card"><p class="mini">Se aprendieron ' + res.equivalencias +
+        ' equivalencia(s): la próxima factura de este proveedor va a reconocer esos ' +
+        'conceptos sola.</p></div>'
+      : '') +
+    '<button class="b-dark" onclick="pantallaPorCostear()">Volver a los lotes por costear</button>' +
+    '<button class="b-ghost" onclick="pantallaInicio()">Inicio</button>');
+}
+
 /* La tarjeta de un lote por costear. Se usa dos veces: arriba los que ya
    detuvieron una cirugía, y plegados abajo los que siguen en el anaquel. */
 function tarjetaLote(l) {
@@ -2269,18 +2739,30 @@ async function pantallaPorCostear() {
         '<button class="b-ghost" onclick="pantallaInicio()">Volver</button>');
     }
 
+    /* Los lotes sin precio, agrupados por la entrada con la que llegaron:
+       una factura cubre una entrada completa, no un lote. */
+    var grupos = agruparPorRecepcion(r.lotes);
+
     pintar(
       '<div class="card"><h3>' + r.total + ' lote(s) sin precio</h3>' +
       '<p class="mini">' + (r.detienen_cirugias
         ? '<b>' + r.detienen_cirugias + '</b> de ellos ya salieron a una cirugía: ' +
           'ésos van primero, porque son los que están dejando una caja sin costear.'
         : 'Ninguno ha salido todavía a cirugía.') +
-      ' El costo se toma de la factura. Si el real y el fiscal son el mismo, ' +
-      'basta con llenar el real.</p></div>' +
+      ' El costo se toma de la factura: si ya llegó el CFDI, la app lo trae. ' +
+      'Capturar a mano sigue estando abajo.</p></div>' +
 
-      /* Primero los que ya detuvieron una cirugía: ésos son los que están
-         costando dinero hoy. El resto queda plegado para que la pantalla no
-         abra con doscientas tarjetas. */
+      /* Primero el camino de la factura, que es el que no se teclea. */
+      bloqueRecepciones(grupos) +
+
+      /* Después, a mano: primero los que ya detuvieron una cirugía, porque
+         ésos son los que están costando dinero hoy. El resto queda plegado
+         para que la pantalla no abra con doscientas tarjetas. */
+      (r.lotes.filter(function (l) { return l.cirugias > 0; }).length
+        ? '<div class="card"><h3>Capturar a mano</h3><p class="mini">Si la factura ' +
+          'todavía no llega, o el precio viene de una nota, aquí se teclea. ' +
+          'Si el real y el fiscal son el mismo, basta con llenar el real.</p></div>'
+        : '') +
       r.lotes.filter(function (l) { return l.cirugias > 0; }).map(tarjetaLote).join('') +
       (r.lotes.filter(function (l) { return !l.cirugias; }).length
         ? '<details class="mas"><summary>Los que todavía no salen a cirugía (' +
@@ -2295,6 +2777,10 @@ async function pantallaPorCostear() {
     r.lotes.forEach(function (l) {
       cablearCosto('k' + l.lote_id, unidadDe(l.sku),
                    function () { return l.cantidad_inicial; });
+    });
+
+    Array.prototype.forEach.call(document.querySelectorAll('[data-fact]'), function (b) {
+      b.onclick = function () { pantallaFactura(this.getAttribute('data-fact')); };
     });
 
     Array.prototype.forEach.call(document.querySelectorAll('[data-guardar]'), function (b) {
