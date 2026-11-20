@@ -879,7 +879,38 @@ function soloAplicacion() { return !!ctxAplicacion().exclusiva; }
 
 var APLIC = null;   // lo que se está capturando
 
-async function pantallaAplicar(ubicId) {
+/* Con más de un almacén que aplica, primero se escoge. Con uno solo no se
+   pregunta nada: una pantalla intermedia que siempre tiene una sola
+   respuesta es una pantalla de más. */
+function pantallaAplicar(ubicId) {
+  var opciones = ctxAplicacion().ubicaciones || [];
+  if (!ubicId && opciones.length > 1) return pantallaAplicarElegir();
+  return abrirAplicar(ubicId || (opciones[0] || {}).ubic_id || '');
+}
+
+function pantallaAplicarElegir(aviso) {
+  var opciones = ctxAplicacion().ubicaciones || [];
+  encabezado('Aplicar a paciente', '¿De cuál almacén?');
+  pintar(
+    (aviso ? '<div class="aviso a-err">' + esc(aviso) + '</div>' : '') +
+    '<div class="card"><h3>¿De cuál almacén sale?</h3>' +
+    '<p class="mini">Cada sede tiene su propio inventario. Lo que escojas aquí es de donde ' +
+    'se va a descontar, así que el material de una clínica no se puede cargar a la otra ' +
+    'por descuido.</p></div>' +
+    opciones.map(function (u) {
+      return '<button class="baldosa fuerte ancha" data-ubic="' + esc(u.ubic_id) + '">' +
+        esc(u.nombre) +
+        (u.sede ? '<span class="q">' + esc(u.sede) + '</span>' : '') + '</button>';
+    }).join('') +
+    '<button class="b-ghost" id="eV">Volver</button>');
+
+  Array.prototype.forEach.call(document.querySelectorAll('[data-ubic]'), function (b) {
+    b.onclick = function () { abrirAplicar(this.getAttribute('data-ubic')); };
+  });
+  $('eV').onclick = function () { pantallaInicio(); };
+}
+
+async function abrirAplicar(ubicId) {
   encabezado('Aplicar a paciente', 'Descontar del almacén');
   pintar('<div class="card"><p class="sub">Cargando…</p></div>');
 
@@ -892,10 +923,13 @@ async function pantallaAplicar(ubicId) {
       'porque valida contra la existencia real.</div>' +
       '<button class="b-ghost" onclick="pantallaInicio()">Volver</button>');
   }
+  /* Si el servidor contesta que falta escoger, se escoge: es el caso de
+     quien llega con varios almacenes y ninguno seleccionado. */
+  if (!r.ok && r.elegir) return pantallaAplicarElegir(r.error);
   if (!r.ok) return pintar('<div class="aviso a-err">' + esc(r.error) + '</div>' +
     '<button class="b-ghost" onclick="pantallaInicio()">Volver</button>');
 
-  APLIC = { ubic_id: r.ubic_id, nombre: r.nombre, lotes: r.lotes,
+  APLIC = { ubic_id: r.ubic_id, nombre: r.nombre, sede: r.sede || '', lotes: r.lotes,
             pacientes: r.pacientes || [], lineas: [], client_id: idCliente() };
   pintarAplicar('');
 }
@@ -933,8 +967,12 @@ function pintarAplicar(busca) {
 
   pintar(
     '<div class="card"><h3>' + esc(APLIC.nombre) + '</h3>' +
+    (APLIC.sede ? '<p class="mini mono">' + esc(APLIC.sede) + '</p>' : '') +
     '<p class="mini">Lo que se aplique aquí se descuenta de este almacén y queda a nombre de ' +
-    'la paciente, con su lote. No abre caja de cirugía ni genera cobro.</p>' +
+    'la paciente, con su lote. No abre caja de cirugía ni genera cobro.' +
+    ((ctxAplicacion().ubicaciones || []).length > 1
+      ? ' <a href="#" id="aCambiar">Cambiar de almacén</a>.'
+      : '') + '</p>' +
     '<div class="campo"><label>Paciente</label>' +
     '<input id="aPac" list="aPacLista" autocomplete="off" placeholder="Nombre completo" value="' +
       esc(APLIC.paciente || '') + '">' +
@@ -1000,6 +1038,18 @@ function pintarAplicar(busca) {
   }
   $('aPac').oninput = recordar;
   $('aNota').oninput = recordar;
+
+  /* Cambiar de almacén tira los renglones puestos: son lotes del otro
+     inventario y no se pueden arrastrar. Se avisa antes en vez de
+     descubrirlo al guardar. */
+  if ($('aCambiar')) $('aCambiar').onclick = function (e) {
+    e.preventDefault();
+    if (APLIC.lineas.length &&
+        !confirm('Tienes ' + APLIC.lineas.length + ' renglón(es) puestos de ' +
+                 APLIC.nombre + '. Al cambiar de almacén se quitan, porque son lotes ' +
+                 'de ese inventario. ¿Cambiar?')) return;
+    pantallaAplicarElegir();
+  };
 
   var lanzar = function () { recordar(); pintarAplicar($('aBusca').value); };
   $('aBusca').onkeydown = function (e) { if (e.key === 'Enter') lanzar(); };
