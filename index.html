@@ -5193,9 +5193,13 @@ function plano(s) {
    mínimo y no propone cuánto comprar. Esa cantidad se decide con el
    proveedor, que es donde está el precio por volumen. */
 
+/* Mismo criterio que «Lotes por costear»: regulatorio pone los mínimos
+   porque es quien sabe cuánto se mueve cada clave. El gateway aplica la
+   misma regla, así que esconder el mosaico no es el candado — es que el
+   candado también se vea. */
 function puedePonerMinimos() {
   var r = String(estado.sesion && estado.sesion.rol).toUpperCase();
-  return r === 'DIRECTOR' || r === 'GERENCIA';
+  return r === 'DIRECTOR' || r === 'GERENCIA' || r === 'REGULATORIO';
 }
 
 /* El borrador vive por almacén|clave, no por clave: así cambiar de almacén o
@@ -5327,7 +5331,7 @@ function pintarMinimos() {
       'expresamente que no hay que tener ninguna.</p>' +
     (editable ? '' :
       '<p class="mini">Puedes verlos y avisar lo que está abajo del mínimo. ' +
-      'Ponerlos lo autoriza la dirección.</p>') +
+      'Ponerlos le toca a dirección o a regulatorio.</p>') +
     '</div>' +
 
     '<div class="card">' +
