@@ -184,6 +184,23 @@ input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);
 .campo{margin-bottom:13px}
 .dos{display:grid;grid-template-columns:1fr 1fr;gap:11px}
 
+/* Captura de mínimos: el número se teclea AL LADO de la existencia contra la
+   que hay que calibrarlo. En dos pantallas separadas habría que memorizar un
+   número mientras se escribe el otro. */
+.min-fila{display:grid;grid-template-columns:1fr 94px;gap:11px;align-items:center;
+  padding:11px 0;border-bottom:1px solid var(--rule)}
+.min-fila:last-of-type{border-bottom:0}
+.min-fila .t{min-width:0;display:block}
+.min-fila .t .n{display:block;font-size:.88rem;line-height:1.3}
+.min-fila .t .c{display:block;font-family:'IBM Plex Mono',monospace;font-size:.64rem;
+  letter-spacing:.05em;color:var(--ink-3);margin-top:3px}
+.min-fila input{padding:10px;text-align:right;
+  font-family:'IBM Plex Mono',monospace;font-size:16px}
+.min-fila input.tocado{border-color:var(--accent);background:var(--tint-accent)}
+.min-u{display:block;text-align:right;margin-top:3px;
+  font-family:'IBM Plex Mono',monospace;font-size:.58rem;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--ink-3)}
+
 button{font-family:inherit;font-size:1rem;font-weight:500;border:0;border-radius:9px;
   padding:14px;cursor:pointer;width:100%}
 .b-primary{background:var(--accent);color:#15100C}
@@ -1236,8 +1253,16 @@ function pantallaInicio() {
         '<button class="baldosa" id="bAplics">Aplicaciones<span class="q">Qué se le aplicó a quién</span></button>'
       : '') +
 
+    /* La lista de compra ya no se esconde a quien tiene un solo almacén: le
+       sale la parte que SÍ es de su anaquel —lo que está abajo del mínimo y
+       lo que se va a vencer— y la app le dice que la de cirugía es de la
+       unidad entera. Las dotaciones sí siguen escondidas: un carro rojo no
+       vive en un almacén y recortarlo no significaría nada. */
+    '<button class="baldosa" id="bCompra">Lista de compra<span class="q">Qué pedir</span></button>' +
+    (puedePonerMinimos()
+      ? '<button class="baldosa" id="bMin">Mínimos<span class="q">Cuánto hay que tener siempre</span></button>'
+      : '') +
     (alcanceLimitado() ? '' :
-      '<button class="baldosa" id="bCompra">Lista de compra<span class="q">Qué pedir</span></button>' +
       '<button class="baldosa" id="bDot">Carros y cajas selladas<span class="q">Urgencias</span></button>') +
     (puedeControlados()
       ? '<button class="baldosa" id="bLibro">Libro de controlados<span class="q">Lo que falta registrar</span></button>'
@@ -1271,6 +1296,10 @@ function pantallaInicio() {
     '<button class="baldosa" id="bPlant">Ver plantillas</button>' +
     '<button class="baldosa" id="bLotes">Lotes y bajas</button>' +
     '<button class="baldosa" id="bSinFecha">Folios sin caducidad</button>' +
+    /* Quien no los pone igual los consulta: es la respuesta a «¿qué le pido
+       al doctor?». Va aquí abajo para no cargar su portada. */
+    (puedePonerMinimos() ? '' :
+      '<button class="baldosa" id="bMin2">Mínimos<span class="q">Cuánto hay que tener siempre</span></button>') +
     '<button class="baldosa" id="bActivos">Activos fijos</button>' +
     (puedeVerCostos()
       ? '<button class="baldosa" id="bCostos">Qué costó cada cirugía<span class="q">Costo directo de material</span></button>'
@@ -1305,6 +1334,8 @@ function pantallaInicio() {
   if ($('bAplicar')) $('bAplicar').onclick = function () { pantallaAplicar(); };
   if ($('bAplics')) $('bAplics').onclick = function () { pantallaAplicaciones(); };
   if ($('bCompra')) $('bCompra').onclick = function () { pantallaCompra(); };
+  if ($('bMin')) $('bMin').onclick = function () { pantallaMinimos(); };
+  if ($('bMin2')) $('bMin2').onclick = function () { pantallaMinimos(); };
   if ($('bDot')) $('bDot').onclick = function () { pantallaDotaciones(); };
   if ($('bLibro')) $('bLibro').onclick = function () { pantallaLibro(); };
   if ($('bAgenda')) $('bAgenda').onclick = function () { pantallaAgenda(); };
@@ -5145,6 +5176,281 @@ function plano(s) {
    lo que alcanza para una cirugía pero no para el colchón, y lo que se va
    a vencer. Mezclarlas convierte la lista en ruido y nadie la usa.
    ================================================================= */
+/* ---------- mínimos por almacén ----------
+
+   Se captura el mínimo AL LADO de la existencia de hoy, de su unidad y de lo
+   que ya se ha consumido. Separado en dos pantallas obligaba a memorizar un
+   número mientras se escribía el otro, que es exactamente cómo se pone un
+   mínimo sin sentido.
+
+   El número que se teclea aquí es el CAPTURADO. Cuando el sistema calcule el
+   histórico con el consumo real, podrá subir el mínimo pero nunca bajarlo de
+   lo que una persona escribió: la hialuronidasa es antídoto y su consumo va
+   a ser cero, así que una fórmula por consumo pediría cero. Por eso el
+   renglón enseña los dos números cuando existen los dos.
+
+   No hay máximo a propósito: la lista de compra dice cuánto falta para el
+   mínimo y no propone cuánto comprar. Esa cantidad se decide con el
+   proveedor, que es donde está el precio por volumen. */
+
+function puedePonerMinimos() {
+  var r = String(estado.sesion && estado.sesion.rol).toUpperCase();
+  return r === 'DIRECTOR' || r === 'GERENCIA';
+}
+
+/* El borrador vive por almacén|clave, no por clave: así cambiar de almacén o
+   filtrar la lista no le borra a nadie lo que ya tecleó y no guardó. */
+var minEstado = { ubic: '', r: null, soloFaltan: false, borrador: {} };
+
+function minClave(sku) { return minEstado.ubic + '|' + String(sku).toUpperCase(); }
+
+function minCorreo(c) {
+  var s = String(c || '');
+  return s.indexOf('@') > 0 ? s.slice(0, s.indexOf('@')) : s;
+}
+
+/** Lo que el renglón debe mostrar: el borrador si hay, si no lo guardado. */
+function minValor(x) {
+  var k = minClave(x.sku);
+  if (Object.prototype.hasOwnProperty.call(minEstado.borrador, k)) return minEstado.borrador[k];
+  return x.minimo_capturado === null || x.minimo_capturado === undefined
+         ? '' : String(x.minimo_capturado);
+}
+
+function minGuardado(x) {
+  return x.minimo_capturado === null || x.minimo_capturado === undefined
+         ? '' : String(x.minimo_capturado);
+}
+
+function minTocados() {
+  if (!minEstado.r) return [];
+  return minEstado.r.renglones.filter(function (x) {
+    return minValor(x) !== minGuardado(x);
+  });
+}
+
+async function pantallaMinimos(ubicId) {
+  encabezado('Mínimos', 'Cuánto hay que tener siempre');
+  pintar('<div class="card"><p class="sub">Cargando…</p></div>');
+  var r;
+  try { r = await enviar({ accion: 'minimos_lista', ubic_id: ubicId || '' }, true); }
+  catch (e) {
+    pintar('<div class="aviso a-err">Sin conexión.</div>' +
+           '<button class="b-ghost" id="bV">Volver</button>');
+    $('bV').onclick = function () { pantallaInicio(); };
+    return;
+  }
+  if (!r.ok) {
+    pintar('<div class="aviso a-err">' + esc(r.error) + '</div>' +
+           '<button class="b-ghost" id="bV">Volver</button>');
+    $('bV').onclick = function () { pantallaInicio(); };
+    return;
+  }
+  minEstado.ubic = r.ubic_id;
+  minEstado.r = r;
+  pintarMinimos();
+}
+
+function renglonMinimo(x) {
+  var u = x.unidad || 'pieza';
+  var marcas = [];
+  if (x.bajo) marcas.push('<span class="pill p-crit">faltan ' + nFmt(x.falta) + '</span>');
+  if (x.fuente === 'HISTORICO') {
+    marcas.push('<span class="pill p-warn">histórico ' + nFmt(x.minimo_historico) + '</span>');
+  }
+  if (x.controlado) marcas.push('<span class="pill p-crit">controlado</span>');
+  if (x.inactivo) marcas.push('<span class="pill p-warn">clave desactivada</span>');
+  if (x.dias_caducidad !== null && x.dias_caducidad !== undefined && x.dias_caducidad <= 90) {
+    marcas.push('<span class="pill ' + (x.dias_caducidad < 0 ? 'p-crit' : 'p-warn') + '">' +
+      (x.dias_caducidad < 0 ? 'vencido' : 'vence en ' + x.dias_caducidad + 'd') + '</span>');
+  }
+
+  /* La historia de consumo va en el renglón porque es contra lo que se
+     calibra el número: diez salidas en una semana y diez en seis meses no
+     dicen lo mismo, y los días son la mitad que casi siempre falta. */
+  var hist = x.consumido > 0
+    ? 'ya salieron ' + nFmt(x.consumido) + ' ' + u + ' en ' + x.eventos + ' salida(s)' +
+      (x.dias_historia !== null && x.dias_historia !== undefined
+        ? ' en ' + x.dias_historia + ' día(s)' : '')
+    : 'sin salidas registradas';
+
+  var val = minValor(x);
+  var tocado = val !== minGuardado(x);
+
+  return '<div class="min-fila">' +
+    '<span class="t"><span class="n">' + esc(x.nombre) +
+      (marcas.length ? ' ' + marcas.join(' ') : '') + '</span>' +
+    '<span class="c">' + esc(x.sku) + ' · hay ' + nFmt(x.existencia) + ' ' + esc(u) +
+      (x.lotes > 1 ? ' en ' + x.lotes + ' lotes' : '') +
+      ' · ' + esc(hist) +
+      (x.puesto_en
+        ? ' · mín. de ' + esc(minCorreo(x.puesto_por)) + ', ' + esc(String(x.puesto_en).slice(0, 10))
+        : '') +
+    '</span></span>' +
+    '<span><input type="number" step="any" min="0" inputmode="decimal"' +
+      ' class="mIn' + (tocado ? ' tocado' : '') + '"' +
+      ' data-sku="' + esc(x.sku) + '" value="' + esc(val) + '"' +
+      (minEstado.r.puede_editar ? '' : ' disabled') + '>' +
+      '<span class="min-u">' + esc(u) + '</span></span>' +
+    '</div>';
+}
+
+function pintarMinimos() {
+  var r = minEstado.r;
+  var editable = r.puede_editar;
+
+  var visibles = r.renglones.filter(function (x) {
+    if (!minEstado.soloFaltan) return true;
+    return x.minimo === null || x.bajo;
+  });
+
+  var sel = r.almacenes.length > 1
+    ? '<div class="campo"><label>Almacén</label><select id="mUbic">' +
+      r.almacenes.map(function (a) {
+        return '<option value="' + esc(a.ubic_id) + '"' +
+          (a.ubic_id === r.ubic_id ? ' selected' : '') + '>' +
+          esc(a.nombre) + (a.sede ? ' · ' + esc(a.sede) : '') + '</option>';
+      }).join('') + '</select></div>'
+    : '';
+
+  var tocados = minTocados().length;
+
+  pintar(
+    '<div class="card"><h3>' + esc(r.ubic_nombre) + '</h3>' + sel +
+    '<p class="mini"><b>' + r.total + '</b> clave(s) de este almacén · <b>' +
+      r.con_minimo + '</b> con mínimo · <b>' + r.sin_minimo + '</b> sin poner' +
+      (r.bajos ? ' · <b>' + r.bajos + '</b> abajo del mínimo' : '') + '</p>' +
+    '<p class="mini">El mínimo es cuánto quieres tener SIEMPRE en este anaquel. ' +
+      'No hay máximo: la lista de compra te va a decir cuánto falta para el mínimo, ' +
+      'no cuánto comprar — eso se decide con el proveedor. Déjalo vacío si de esa ' +
+      'clave no quieres que el sistema te avise, y en <b>0</b> si quieres decir ' +
+      'expresamente que no hay que tener ninguna.</p>' +
+    (editable ? '' :
+      '<p class="mini">Puedes verlos y avisar lo que está abajo del mínimo. ' +
+      'Ponerlos lo autoriza la dirección.</p>') +
+    '</div>' +
+
+    '<div class="card">' +
+    '<label style="display:flex;align-items:center;gap:9px;text-transform:none;' +
+      'letter-spacing:0;font-family:inherit;font-size:.85rem;margin:0">' +
+      '<input type="checkbox" id="mSolo" style="width:auto"' +
+      (minEstado.soloFaltan ? ' checked' : '') + '> Sólo los que faltan' +
+    '</label></div>' +
+
+    (visibles.length
+      ? '<div class="card">' +
+        (minEstado.soloFaltan
+          ? '<div class="sub-t">Sin mínimo o abajo del mínimo</div>'
+          : '<div class="sub-t">Lo que maneja este almacén</div>') +
+        visibles.map(renglonMinimo).join('') + '</div>'
+      : '<div class="aviso a-ok">Nada pendiente en este almacén.</div>') +
+
+    (editable
+      ? '<button class="b-primary" id="mGuardar"' + (tocados ? '' : ' disabled') + '>' +
+        (tocados ? 'Guardar ' + tocados + ' cambio(s)' : 'Guardar') + '</button>'
+      : '') +
+    '<button class="b-ghost" id="bV">Volver</button>');
+
+  if ($('mUbic')) {
+    $('mUbic').onchange = function () { pantallaMinimos(this.value); };
+  }
+  $('mSolo').onchange = function () {
+    minEstado.soloFaltan = this.checked;
+    pintarMinimos();
+  };
+
+  Array.prototype.forEach.call(document.querySelectorAll('.mIn'), function (i) {
+    i.oninput = function () {
+      minEstado.borrador[minClave(this.getAttribute('data-sku'))] = String(this.value).trim();
+      /* Sólo se refresca el botón y el realce: repintar la lista en cada
+         tecla le quitaría el foco a quien está escribiendo. */
+      var x = minEstado.r.renglones.filter(function (y) {
+        return y.sku === i.getAttribute('data-sku');
+      })[0];
+      if (x) i.classList.toggle('tocado', minValor(x) !== minGuardado(x));
+      var n = minTocados().length;
+      var b = $('mGuardar');
+      if (b) {
+        b.disabled = !n;
+        b.textContent = n ? 'Guardar ' + n + ' cambio(s)' : 'Guardar';
+      }
+    };
+  });
+
+  if ($('mGuardar')) $('mGuardar').onclick = function () { guardarMinimos(this); };
+  $('bV').onclick = function () {
+    var n = minTocados().length;
+    if (n && !confirm('Tienes ' + n + ' cambio(s) sin guardar. ¿Salir de todos modos?')) return;
+    minEstado.borrador = {};
+    pantallaInicio();
+  };
+}
+
+async function guardarMinimos(boton) {
+  var tocados = minTocados();
+  if (!tocados.length) return;
+
+  var filas = [], malos = [];
+  tocados.forEach(function (x) {
+    var v = minValor(x);
+    if (v !== '' && (isNaN(parseFloat(v)) || parseFloat(v) < 0)) {
+      malos.push(x.sku);
+      return;
+    }
+    filas.push({ sku: x.sku, minimo: v });
+  });
+  if (malos.length) {
+    return alertar('Revisa ' + malos.join(', ') + ': un mínimo es un número y no puede ser negativo.');
+  }
+
+  boton.disabled = true;
+  boton.textContent = 'Guardando…';
+  var res;
+  try {
+    res = await enviar({ accion: 'minimo_guardar', ubic_id: minEstado.ubic, filas: filas }, true);
+  } catch (e) {
+    boton.disabled = false;
+    boton.textContent = 'Guardar ' + tocados.length + ' cambio(s)';
+    return alertar('No se pudo guardar: ' + (e && e.message ? e.message : 'sin conexión'));
+  }
+  if (!res.ok) {
+    boton.disabled = false;
+    boton.textContent = 'Guardar ' + tocados.length + ' cambio(s)';
+    return alertar(res.error);
+  }
+
+  /* El borrador se limpia SÓLO de este almacén: lo que haya tecleado en otro
+     y no haya guardado sigue ahí esperándolo. */
+  var prefijo = minEstado.ubic + '|';
+  Object.keys(minEstado.borrador).forEach(function (k) {
+    if (k.indexOf(prefijo) === 0) delete minEstado.borrador[k];
+  });
+
+  var dicho = [];
+  if (res.agregados) dicho.push(res.agregados + ' puesto(s)');
+  if (res.actualizados) dicho.push(res.actualizados + ' cambiado(s)');
+  if (res.quitados) dicho.push(res.quitados + ' quitado(s)');
+  if (res.claves_malas && res.claves_malas.length) {
+    dicho.push('no se pudo con ' + res.claves_malas.join(', '));
+  }
+  await pantallaMinimos(minEstado.ubic);
+  if (dicho.length) alertar('Guardado: ' + dicho.join(' · '));
+}
+
+/** Un renglón de la lista de compra que viene del mínimo, no de una plantilla. */
+function renglonBajoMinimo(x) {
+  var u = x.unidad || 'pieza';
+  return '<div class="fila-lote">' +
+    '<span class="t"><span class="n">' + esc(x.nombre) +
+      (x.controlado ? ' <span class="pill p-crit">controlado</span>' : '') +
+      (x.fuente === 'HISTORICO' ? ' <span class="pill p-warn">mínimo por consumo</span>' : '') +
+    '</span>' +
+    '<span class="c">' + esc(x.sku) + ' · ' + esc(x.ubic_nombre) + ' · hay ' +
+      nFmt(x.hay) + ' ' + esc(u) + ' · mínimo ' + nFmt(x.minimo) + '</span></span>' +
+    '<span class="pill ' + (x.en_cero ? 'p-crit' : 'p-warn') + '">faltan ' +
+      nFmt(x.falta) + '</span></div>';
+}
+
 var COLCHON_KEY = 'msu_alm_colchon';
 
 function colchonGuardado() {
@@ -5194,18 +5500,34 @@ async function pantallaCompra(colchon) {
   }).join('');
 
   pintar(
-    '<div class="card"><h3>Para cuántas cirugías quiero tener</h3>' +
-    '<p class="mini">El mínimo sale de lo que pide una plantilla, que es el único dato cierto mientras ' +
-    'no haya historia de consumo. El colchón se cuenta en cirugías, no en piezas.</p>' +
-    '<div class="campo"><select id="cCol">' + sel + '</select></div></div>' +
+    /* El motor por mínimo capturado va PRIMERO cuando es el único que corre:
+       para quien tiene un solo almacén, el de cirugía está vacío y abrir la
+       pantalla con un selector de colchón que no hace nada sería ofrecerle
+       una palanca desconectada. */
+    (r.sin_cirugias ? '<div class="aviso a-info">' + esc(r.sin_cirugias) + '</div>' : '') +
 
-    (r.bloquean.length
+    ((r.bajo_minimo || []).length
+      ? '<div class="card"><div class="sub-t">Abajo del mínimo</div>' +
+        '<p class="mini">Mínimos puestos a mano, por almacén. Dice cuánto falta para llegar ' +
+        'al mínimo, no cuánto comprar: esa cantidad se decide con el proveedor.</p>' +
+        r.bajo_minimo.map(renglonBajoMinimo).join('') + '</div>'
+      : (r.solo_minimos
+          ? '<div class="aviso a-ok">Nada abajo del mínimo en su almacén.</div>'
+          : '')) +
+
+    (r.solo_minimos ? '' :
+      '<div class="card"><h3>Para cuántas cirugías quiero tener</h3>' +
+      '<p class="mini">Éste es el otro mínimo: el que sale de lo que pide una plantilla de ' +
+      'cirugía. El colchón se cuenta en cirugías, no en piezas.</p>' +
+      '<div class="campo"><select id="cCol">' + sel + '</select></div></div>') +
+
+    (r.solo_minimos ? '' : r.bloquean.length
       ? '<div class="card"><div class="sub-t">No alcanza ni para una cirugía</div>' +
         '<p class="mini">Esto impide armar la caja hoy.</p>' +
         r.bloquean.map(function (x) { return renglon(x, 'bloquea'); }).join('') + '</div>'
       : '<div class="aviso a-ok">Todo alcanza al menos para una cirugía.</div>') +
 
-    (r.bajos.length
+    (r.solo_minimos ? '' : r.bajos.length
       ? '<div class="card"><div class="sub-t">Alcanza para una, no para el colchón</div>' +
         '<p class="mini">Se puede operar, pero el anaquel queda en cero después.</p>' +
         r.bajos.map(function (x) { return renglon(x, 'bajo'); }).join('') + '</div>'
@@ -5220,12 +5542,30 @@ async function pantallaCompra(colchon) {
     '<button class="b-dark" id="bCopiar">Copiar la lista</button>' +
     '<button class="b-ghost" id="bV">Volver</button>');
 
-  $('cCol').onchange = function () { pantallaCompra(parseInt(this.value, 10)); };
+  /* El selector no existe cuando el motor de cirugía no corre. */
+  if ($('cCol')) $('cCol').onchange = function () { pantallaCompra(parseInt(this.value, 10)); };
 
   $('bCopiar').onclick = function () {
     var lineas = [];
-    lineas.push('Lista de compra · almacén Zorvix · ' + hoyISO());
-    lineas.push('Para poder armar ' + r.colchon + (r.colchon === 1 ? ' cirugía' : ' cirugías') + ' sin ir a comprar.');
+    /* Decía «almacén Zorvix» siempre, de cuando no había más. Esta lista ya
+       se la puede llevar quien cuida el anaquel de Renasté, y una lista que
+       miente en su encabezado se manda al proveedor equivocado. */
+    var ambito = r.solo_minimos
+      ? nombreAlmacen((((estado.cat || {}).alcance) || []).join(','))
+      : 'todos los almacenes';
+    lineas.push('Lista de compra · ' + (ambito || 'MS Universe') + ' · ' + hoyISO());
+    if (!r.solo_minimos) {
+      lineas.push('Para poder armar ' + r.colchon + (r.colchon === 1 ? ' cirugía' : ' cirugías') + ' sin ir a comprar.');
+    }
+    if ((r.bajo_minimo || []).length) {
+      lineas.push('');
+      lineas.push('Abajo del mínimo:');
+      r.bajo_minimo.forEach(function (x) {
+        lineas.push('  ' + x.sku + '  ' + x.nombre + '  —  ' + x.ubic_nombre +
+                    ': hay ' + nFmt(x.hay) + ', mínimo ' + nFmt(x.minimo) +
+                    ', faltan ' + nFmt(x.falta) + ' ' + (x.unidad || 'pieza'));
+      });
+    }
     if (r.bloquean.length) {
       lineas.push('');
       lineas.push('URGENTE — no alcanza ni para una cirugía:');
