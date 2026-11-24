@@ -1930,6 +1930,11 @@ async function pantallaReporte(periodo, fecha) {
 
     (r.por_producto.length
       ? '<div class="card"><h3>Por producto</h3>' +
+        (r.ve_costo
+          ? '<p class="mini">Aqu\u00ed se suma todo rengl\u00f3n con precio de lote, aunque su ' +
+            'aplicaci\u00f3n haya quedado incompleta. Por eso este total es mayor que el de ' +
+            'arriba, que s\u00f3lo cuenta aplicaciones costeadas al 100 %.</p>'
+          : '') +
         r.por_producto.map(function (x) {
           return '<div class="fila-lote"><span class="t">' +
             '<span class="n">' + esc(x.nombre) + '</span>' +
