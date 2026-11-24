@@ -886,6 +886,521 @@ async function leerCodigo(op) {
    ponerle enfrente el que caduca primero.
    ================================================================= */
 
+/* =================================================================
+   Cuadre · la cita y la justificación de cobro
+
+   Dos cambios a la pantalla de aplicar y una pantalla nueva.
+
+   LA PACIENTE YA NO SE TECLEA. Se escoge de la agenda del día. Teclear un
+   nombre es como la misma persona acaba escrita de tres maneras y el
+   historial deja de sumarse; además, amarrar la salida a la cita es lo que
+   después permite cruzar agenda contra almacén sin adivinar por nombre.
+
+   Se deja una salida de emergencia —«no está en la agenda»— porque la
+   alternativa sería que alguien no pueda registrar lo que ya aplicó. Pero
+   es explícita y avisa: esa aplicación va a salir en el cuadre como
+   aplicación sin cita, hasta que alguien la explique.
+
+   LA JUSTIFICACIÓN SE DECLARA AL GUARDAR, no después. Si se dejara para
+   luego, «luego» es nunca. Y como una de las opciones es «pendiente», nadie
+   tiene que inventar una respuesta con tal de poder cerrar la pantalla.
+   ================================================================= */
+
+function hoyFront_() {
+  var d = new Date(), p = function (n) { return String(n).padStart(2, '0'); };
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+}
+
+function diaMas_(iso, dias) {
+  var p = String(iso).split('-');
+  var d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+  d.setDate(d.getDate() + dias);
+  var z = function (n) { return String(n).padStart(2, '0'); };
+  return d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate());
+}
+
+function soloHora_(s) { return String(s || '').slice(11, 16); }
+
+/* ---------------- las citas del día ---------------- */
+
+async function cargarCitasAplicar(fecha) {
+  APLIC.fechaCitas = fecha || hoyFront_();
+  APLIC.citas = [];
+  APLIC.citasAviso = '';
+  APLIC.citasCargando = true;
+  try {
+    var r = await enviar({ accion: 'citas_dia', ubic_id: APLIC.ubic_id,
+                           fecha: APLIC.fechaCitas }, true);
+    if (r.ok) {
+      APLIC.citas = r.citas || [];
+      APLIC.citasAviso = r.aviso || (r.problemas || []).join(' · ');
+    } else {
+      APLIC.citasAviso = r.error || 'No se pudo leer la agenda.';
+    }
+  } catch (e) {
+    APLIC.citasAviso = 'Sin señal para leer la agenda.';
+  }
+  APLIC.citasCargando = false;
+}
+
+function tarjetaCita() {
+  /* Ya escogida: se enseña lo escogido y un botón para cambiarla. Dejar la
+     lista completa abierta después de escoger sólo invita a equivocarse. */
+  if (APLIC.cita) {
+    var c = APLIC.cita;
+    return '<div class="card"><h3>' + esc(c.paciente || '(sin nombre en la agenda)') + '</h3>' +
+      '<p class="mini mono">' + esc(APLIC.fechaCitas) + ' ' + esc(soloHora_(c.inicio)) +
+        ' · ' + esc(c.agenda) + '</p>' +
+      (c.procedimiento ? '<p class="mini">' + esc(c.procedimiento) + '</p>' : '') +
+      (c.retoque ? '<span class="pill p-info">retoque</span> ' : '') +
+      (c.estructurada ? '' : '<span class="pill p-warn">agenda a mano</span> ') +
+      (c.aplicaciones && c.aplicaciones.length
+        ? '<div class="aviso a-warn">Esta cita ya tiene ' + c.aplicaciones.length +
+          ' aplicación(es) registrada(s): ' +
+          c.aplicaciones.map(function (a) { return esc(a.folio); }).join(', ') +
+          '. Si lo que vas a registrar es distinto, adelante; si es lo mismo, ya está.</div>'
+        : '') +
+      '<button class="b-ghost" id="cCambiar" style="margin-top:8px">Cambiar de cita</button></div>';
+  }
+
+  /* Modo manual: la paciente no está en la agenda. */
+  if (APLIC.sinCita) {
+    return '<div class="card"><h3>Paciente fuera de la agenda</h3>' +
+      '<div class="campo"><label>Nombre completo</label>' +
+      '<input id="aPac" list="aPacLista" autocomplete="off" placeholder="Como está en el expediente" value="' +
+        esc(APLIC.paciente || '') + '">' +
+      '<datalist id="aPacLista">' +
+        (APLIC.pacientes || []).map(function (n) { return '<option value="' + esc(n) + '">'; }).join('') +
+      '</datalist></div>' +
+      '<div class="aviso a-warn">Esta aplicación va a salir en el cuadre como ' +
+      '<b>aplicación sin cita</b> hasta que alguien la explique. Si la paciente sí ' +
+      'está en la agenda, mejor escógela de ahí.</div>' +
+      '<button class="b-ghost" id="cVolverAgenda">Buscarla en la agenda</button></div>';
+  }
+
+  /* Lista del día. */
+  var dia = APLIC.fechaCitas || hoyFront_();
+  var lista = APLIC.citas || [];
+  var cab =
+    '<div class="card"><h3>¿A quién se le aplicó?</h3>' +
+    '<p class="mini">Escógela de la agenda. De ahí sale su nombre, para que no quede ' +
+    'escrito de dos maneras distintas.</p>' +
+    '<div class="buscador">' +
+    '<button class="b-ghost" id="cAyer" style="width:auto;margin:0">◀</button>' +
+    '<input id="cFecha" type="date" value="' + esc(dia) + '">' +
+    '<button class="b-ghost" id="cManana" style="width:auto;margin:0">▶</button></div>';
+
+  if (APLIC.citasCargando) return cab + '<p class="sub">Leyendo la agenda…</p></div>';
+
+  var cuerpo;
+  if (!lista.length) {
+    cuerpo = '<div class="aviso a-info">' +
+      (APLIC.citasAviso ? esc(APLIC.citasAviso) : 'No hay citas ese día.') + '</div>';
+  } else {
+    /* Las de inyectable arriba: son las que casi siempre se buscan. El
+       resto se deja a la vista porque la agenda de la Dra. Damián es texto
+       libre y muchas veces no dice el tratamiento. */
+    var ord = lista.slice().sort(function (a, b) {
+      if (!!a.inyectable !== !!b.inyectable) return a.inyectable ? -1 : 1;
+      return String(a.inicio).localeCompare(String(b.inicio));
+    });
+    cuerpo = ord.map(function (c) {
+      var ya = c.aplicaciones && c.aplicaciones.length;
+      return '<div class="fila-lote"><span class="t">' +
+        '<span class="n">' + esc(c.paciente || '(sin nombre)') + '</span>' +
+        '<span class="c">' + esc(soloHora_(c.inicio)) + ' · ' + esc(c.agenda) +
+          (c.procedimiento ? ' · ' + esc(c.procedimiento) : '') + '</span></span>' +
+        (c.retoque ? '<span class="pill p-info">retoque</span>' : '') +
+        (ya ? '<span class="pill p-ok">ya aplicada</span>' : '') +
+        '<button class="b-dark" data-cita="' + esc(c.id) +
+          '" style="width:auto;margin:0">Escoger</button></div>';
+    }).join('') +
+    (APLIC.citasAviso ? '<p class="mini">' + esc(APLIC.citasAviso) + '</p>' : '');
+  }
+
+  return cab + cuerpo +
+    '<button class="b-ghost" id="cSinCita" style="margin-top:8px">No está en la agenda</button></div>';
+}
+
+function cablearCita(repintar) {
+  if ($('cCambiar')) $('cCambiar').onclick = function () {
+    APLIC.cita = null; APLIC.cita_id = ''; APLIC.paciente = '';
+    repintar();
+  };
+  if ($('cSinCita')) $('cSinCita').onclick = function () {
+    APLIC.sinCita = true; repintar();
+  };
+  if ($('cVolverAgenda')) $('cVolverAgenda').onclick = function () {
+    APLIC.sinCita = false; APLIC.paciente = ''; repintar();
+  };
+  if ($('cFecha')) $('cFecha').onchange = async function () {
+    await cargarCitasAplicar(this.value); repintar();
+  };
+  if ($('cAyer')) $('cAyer').onclick = async function () {
+    await cargarCitasAplicar(diaMas_(APLIC.fechaCitas, -1)); repintar();
+  };
+  if ($('cManana')) $('cManana').onclick = async function () {
+    await cargarCitasAplicar(diaMas_(APLIC.fechaCitas, 1)); repintar();
+  };
+  Array.prototype.forEach.call(document.querySelectorAll('[data-cita]'), function (b) {
+    b.onclick = function () {
+      var id = this.getAttribute('data-cita');
+      var hallada = null;
+      (APLIC.citas || []).forEach(function (c) { if (c.id === id) hallada = c; });
+      if (!hallada) return;
+      APLIC.cita = hallada;
+      APLIC.cita_id = hallada.id;
+      APLIC.paciente = hallada.paciente || '';
+      APLIC.sinCita = false;
+      /* Un retoque lo marca la agenda sola: no hay por qué pedirle a nadie
+         que lo declare, y preseleccionarlo evita que lo deje en pendiente
+         por flojera. */
+      if (hallada.retoque && !APLIC.just.tipo) APLIC.just.tipo = 'RETOQUE';
+      repintar();
+    };
+  });
+}
+
+/* ---------------- la justificación de cobro ---------------- */
+
+var JUST_TEXTO = {
+  FOLIO:     ['Con folio de cobro', 'El folio dice solo si fue precio lleno, anticipo, descuento o cortesía.'],
+  PAQUETE:   ['Paquete prepagado', 'Se cobró antes, en otro folio.'],
+  RETOQUE:   ['Retoque de toxina', 'No se cobra. Va amarrado a la aplicación original.'],
+  DIRECTO:   ['Cobro directo de la médica', 'No pasa por el sistema de cobros. Se captura a mano.'],
+  PENDIENTE: ['Todavía no se sabe', 'Queda en rojo en el cuadre hasta que alguien lo resuelva.']
+};
+
+function tarjetaJustificacion() {
+  var j = APLIC.just || (APLIC.just = {});
+  var botones = Object.keys(JUST_TEXTO).map(function (k) {
+    var sel = j.tipo === k;
+    return '<button class="' + (sel ? 'b-dark' : 'b-ghost') + '" data-just="' + k +
+      '" style="text-align:left">' + esc(JUST_TEXTO[k][0]) + '</button>';
+  }).join('');
+
+  var extra = '';
+  if (j.tipo === 'FOLIO' || j.tipo === 'PAQUETE') {
+    extra =
+      '<div class="campo"><label>Folio de cobro</label>' +
+      '<input id="jFolio" autocomplete="off" placeholder="Como viene en el sistema de cobros" value="' +
+        esc(j.folio_cobro || '') + '"></div>' +
+      '<button class="b-ghost" id="jBuscar">Buscar el cobro de esta paciente</button>' +
+      (j.buscando ? '<p class="sub">Buscando…</p>' : '') +
+      (j.cobros && j.cobros.length
+        ? j.cobros.map(function (c) {
+            return '<div class="fila-lote"><span class="t">' +
+              '<span class="n">' + esc(c.paciente) + ' · ' + esc(c.tratamiento || c.linea) + '</span>' +
+              '<span class="c">' + esc(c.folio) + ' · ' + esc(c.fecha) + ' · ' +
+                esc(c.condicion) + ' · ' + pesos(c.monto) + '</span></span>' +
+              (c.cortesia ? '<span class="pill p-info">cortesía</span>' : '') +
+              '<button class="b-dark" data-cobro="' + esc(c.folio) +
+                '" style="width:auto;margin:0">Usar</button></div>';
+          }).join('')
+        : (j.buscado ? '<p class="mini">No encontré cobros de esa paciente ese día.</p>' : '')) +
+      (j.cobro
+        ? '<div class="aviso a-ok">' + esc(j.cobro.folio) + ' · ' + esc(j.cobro.condicion) +
+          ' · ' + pesos(j.cobro.monto) +
+          (j.cobro.cortesia ? ' · es una cortesía, no hace falta declararla aparte' : '') +
+          '</div>'
+        : '');
+  } else if (j.tipo === 'DIRECTO') {
+    extra =
+      '<div class="campo"><label>Cuánto cobró</label>' +
+      '<input id="jMonto" type="number" inputmode="decimal" min="0" step="1" placeholder="0" value="' +
+        esc(j.monto || '') + '"></div>' +
+      '<p class="mini">Queda firmado con tu cuenta y la hora. Sin monto no se puede cuadrar ' +
+      'contra nada.</p>';
+  } else if (j.tipo === 'RETOQUE') {
+    extra = '<div class="campo"><label>Folio de la aplicación original <span class="mini">(si lo tienes)</span></label>' +
+      '<input id="jOrig" autocomplete="off" placeholder="APL-2026-…" value="' +
+        esc(j.folio_original || '') + '"></div>';
+  } else if (j.tipo === 'PENDIENTE') {
+    extra = '<div class="aviso a-warn">Va a salir en rojo en el cuadre hasta que alguien ' +
+      'le ponga el folio. Está bien dejarlo así si de verdad no se sabe todavía.</div>';
+  }
+
+  return '<div class="card"><h3>¿Por qué sale del almacén?</h3>' +
+    '<p class="mini">' + (j.tipo ? esc(JUST_TEXTO[j.tipo][1])
+      : 'No debe haber una salida sin paciente y sin una razón de cobro.') + '</p>' +
+    '<div class="rejilla">' + botones + '</div>' + extra +
+    '<div class="campo"><label>Nota del cobro <span class="mini">(opcional)</span></label>' +
+    '<input id="jNota" autocomplete="off" value="' + esc(j.nota || '') + '"></div></div>';
+}
+
+function cablearJustificacion(repintar) {
+  var j = APLIC.just;
+
+  function recordarJ() {
+    if ($('jFolio')) j.folio_cobro = $('jFolio').value.trim();
+    if ($('jMonto')) j.monto = $('jMonto').value.trim();
+    if ($('jOrig')) j.folio_original = $('jOrig').value.trim();
+    if ($('jNota')) j.nota = $('jNota').value.trim();
+  }
+  APLIC.recordarJ = recordarJ;
+
+  Array.prototype.forEach.call(document.querySelectorAll('[data-just]'), function (b) {
+    b.onclick = function () {
+      recordarJ();
+      var k = this.getAttribute('data-just');
+      j.tipo = (j.tipo === k) ? '' : k;
+      j.cobro = null; j.cobros = null; j.buscado = false;
+      repintar();
+    };
+  });
+
+  function alTeclear() { recordarJ(); actualizarFalta(); }
+  if ($('jFolio')) $('jFolio').oninput = alTeclear;
+  if ($('jMonto')) $('jMonto').oninput = alTeclear;
+  if ($('jOrig')) $('jOrig').oninput = alTeclear;
+  if ($('jNota')) $('jNota').oninput = alTeclear;
+
+  if ($('jBuscar')) $('jBuscar').onclick = async function () {
+    recordarJ();
+    var quien = APLIC.paciente || (APLIC.cita && APLIC.cita.paciente) || '';
+    if (!quien) return alertar('Primero escoge la cita, para saber de quién buscar el cobro.');
+    j.buscando = true; repintar();
+    try {
+      var r = await enviar({ accion: 'cobro_buscar', paciente: quien,
+                             fecha: APLIC.fechaCitas || hoyFront_() }, true);
+      j.cobros = r.ok ? r.cobros : [];
+      if (!r.ok) alertar(r.error);
+    } catch (e) {
+      j.cobros = []; alertar('Sin señal para buscar el cobro.');
+    }
+    j.buscando = false; j.buscado = true; repintar();
+  };
+
+  Array.prototype.forEach.call(document.querySelectorAll('[data-cobro]'), function (b) {
+    b.onclick = function () {
+      recordarJ();
+      var folio = this.getAttribute('data-cobro');
+      (j.cobros || []).forEach(function (c) { if (c.folio === folio) j.cobro = c; });
+      j.folio_cobro = folio;
+      repintar();
+    };
+  });
+}
+
+/* El botón de guardar y el aviso de «falta esto» se refrescan sin
+   repintar: teclear un folio a mano tiene que habilitar el botón en el
+   momento, no hasta que algo más provoque un repintado. */
+function actualizarFalta() {
+  var falta = faltaParaAplicar();
+  var b = $('aGuardar');
+  if (b) b.disabled = !!falta;
+  var a = $('aFalta');
+  if (a) {
+    a.textContent = falta;
+    a.style.display = falta ? '' : 'none';
+  }
+}
+
+/** Lo que falta para poder guardar. Cadena vacía si todo está. */
+function faltaParaAplicar() {
+  var j = APLIC.just || {};
+  if (!APLIC.cita_id && !APLIC.sinCita) return 'Falta escoger la cita.';
+  if (APLIC.sinCita && !String(APLIC.paciente || '').trim()) return 'Falta el nombre de la paciente.';
+  if (!APLIC.lineas.length) return 'No has puesto nada.';
+  if (!j.tipo) return 'Falta decir por qué sale del almacén.';
+  if ((j.tipo === 'FOLIO' || j.tipo === 'PAQUETE') && !String(j.folio_cobro || '').trim()) {
+    return 'Falta el folio de cobro.';
+  }
+  if (j.tipo === 'DIRECTO' && !(Number(j.monto) > 0)) return 'Falta cuánto cobró.';
+  return '';
+}
+
+/* ---------------- el tablero de cuadre ---------------- */
+
+async function pantallaCuadre(fecha) {
+  var dia = fecha || hoyFront_();
+  encabezado('Cuadre del día', 'Paciente y cobro detrás de cada salida');
+  pintar('<div class="card"><p class="sub">Cargando…</p></div>');
+
+  var r;
+  try {
+    r = await enviar({ accion: 'cuadre', fecha: dia }, true);
+  } catch (e) {
+    return pintar('<div class="aviso a-err">Sin conexión. El cuadre lee tres fuentes ' +
+      'en vivo: almacén, agenda y cobros.</div>' +
+      '<button class="b-ghost" onclick="pantallaInicio()">Volver</button>');
+  }
+  if (!r.ok) return pintar('<div class="aviso a-err">' + esc(r.error) + '</div>' +
+    '<button class="b-ghost" onclick="pantallaInicio()">Volver</button>');
+
+  var s = r.resumen;
+  var limpio = !s.sin_justificar && !s.citas_sin_aplicacion &&
+               !s.aplicaciones_sin_cita && !s.cobros_sin_aplicacion;
+
+  function bloque(titulo, explica, filas, pinta, clase) {
+    if (!filas || !filas.length) return '';
+    return '<div class="card"><h3>' + esc(titulo) + ' · ' + filas.length + '</h3>' +
+      '<p class="mini">' + esc(explica) + '</p>' +
+      filas.map(pinta).join('') + '</div>';
+  }
+
+  pintar(
+    '<div class="card"><div class="buscador">' +
+    '<button class="b-ghost" id="kAyer" style="width:auto;margin:0">◀</button>' +
+    '<input id="kFecha" type="date" value="' + esc(dia) + '">' +
+    '<button class="b-ghost" id="kManana" style="width:auto;margin:0">▶</button></div>' +
+    '<p class="mini">' + s.aplicaciones + ' aplicación(es) · ' + s.justificadas + ' justificada(s) · ' +
+      s.citas_inyectable + ' cita(s) de inyectable</p></div>' +
+
+    (r.cobros_ok ? '' :
+      '<div class="aviso a-warn">No se pudo leer el sistema de cobros, así que el ' +
+      'cruce contra cobros de este día no es confiable.</div>') +
+    (r.agenda_ok ? '' :
+      '<div class="aviso a-warn">La agenda no contestó: lo que falte de citas no quiere ' +
+      'decir que no las hubo.</div>') +
+    (r.avisos || []).map(function (a) {
+      return '<div class="aviso a-info">' + esc(a) + '</div>';
+    }).join('') +
+
+    (limpio ? '<div class="aviso a-ok">Todo cuadra este día.</div>' : '') +
+
+    bloque('Salidas sin justificar',
+      'Salió material y nadie dijo por qué. Es el hueco que hay que cerrar.',
+      r.sin_justificar, function (a) {
+        return '<div class="fila-lote"><span class="t">' +
+          '<span class="n">' + esc(a.paciente || '(sin paciente)') + ' · ' + a.piezas + ' pieza(s)</span>' +
+          '<span class="c">' + esc(a.folio) + ' · ' + esc(a.hora) + ' · ' + esc(a.ubic_nombre) +
+            (a.problema ? ' · ' + esc(a.problema) : '') + '</span></span>' +
+          '<button class="b-dark" data-just-folio="' + esc(a.folio) +
+            '" style="width:auto;margin:0">Justificar</button></div>';
+      }) +
+
+    bloque('Cobros de inyectables sin aplicación',
+      'Se cobró material que el almacén no registró que saliera.',
+      (r.cobros_sin_aplicacion || []).filter(function (c) { return !c.anticipo; }),
+      function (c) {
+        return '<div class="fila-lote"><span class="t">' +
+          '<span class="n">' + esc(c.paciente) + ' · ' + esc(c.tratamiento || c.linea) + '</span>' +
+          '<span class="c">' + esc(c.folio) + ' · ' + esc(c.condicion) + ' · ' + pesos(c.monto) +
+          '</span></span>' +
+          (c.cortesia ? '<span class="pill p-info">cortesía</span>' : '') + '</div>';
+      }) +
+
+    bloque('Citas de inyectable sin aplicación',
+      'La agenda dice que hubo inyectable y no se descontó nada.',
+      r.citas_sin_aplicacion, function (c) {
+        return '<div class="fila-lote"><span class="t">' +
+          '<span class="n">' + esc(c.paciente || '(sin nombre)') + '</span>' +
+          '<span class="c">' + esc(c.hora) + ' · ' + esc(c.agenda) +
+            (c.procedimiento ? ' · ' + esc(c.procedimiento) : '') + '</span></span>' +
+          (c.retoque ? '<span class="pill p-info">retoque</span>' : '') +
+          (c.estructurada ? '' : '<span class="pill p-warn">agenda a mano</span>') + '</div>';
+      }) +
+
+    bloque('Aplicaciones sin cita',
+      'Se descontó material y no hay cita a la cual amarrarlo.',
+      r.aplicaciones_sin_cita, function (a) {
+        return '<div class="fila-lote"><span class="t">' +
+          '<span class="n">' + esc(a.paciente || '(sin paciente)') + ' · ' + a.piezas + ' pieza(s)</span>' +
+          '<span class="c">' + esc(a.folio) + ' · ' + esc(a.hora) + ' · ' +
+            esc(a.justificacion || '') + '</span></span></div>';
+      }) +
+
+    bloque('Retoques', 'Legítimos: no se cobran. Se listan para que se vean.',
+      r.retoques, function (a) {
+        return '<div class="fila-lote"><span class="t">' +
+          '<span class="n">' + esc(a.paciente) + ' · ' + a.piezas + ' pieza(s)</span>' +
+          '<span class="c">' + esc(a.folio) + ' · ' + esc(a.hora) + '</span></span></div>';
+      }) +
+
+    bloque('Cortesías', 'Autorizadas en el sistema de cobros, no aquí.',
+      r.cortesias, function (a) {
+        return '<div class="fila-lote"><span class="t">' +
+          '<span class="n">' + esc(a.paciente) + ' · ' + a.piezas + ' pieza(s)</span>' +
+          '<span class="c">' + esc(a.folio) + ' · ' + esc(a.folio_cobro) + '</span></span></div>';
+      }) +
+
+    bloque('Anticipos sin aplicación',
+      'Se cobró por adelantado. No es un faltante: todavía no toca aplicar nada.',
+      (r.cobros_sin_aplicacion || []).filter(function (c) { return c.anticipo; }),
+      function (c) {
+        return '<div class="fila-lote"><span class="t">' +
+          '<span class="n">' + esc(c.paciente) + ' · ' + esc(c.tratamiento || c.linea) + '</span>' +
+          '<span class="c">' + esc(c.folio) + ' · ' + pesos(c.monto) + '</span></span></div>';
+      }) +
+
+    '<button class="b-ghost" onclick="pantallaInicio()">Volver</button>');
+
+  $('kFecha').onchange = function () { pantallaCuadre(this.value); };
+  $('kAyer').onclick = function () { pantallaCuadre(diaMas_(dia, -1)); };
+  $('kManana').onclick = function () { pantallaCuadre(diaMas_(dia, 1)); };
+  Array.prototype.forEach.call(document.querySelectorAll('[data-just-folio]'), function (b) {
+    b.onclick = function () {
+      var f = this.getAttribute('data-just-folio'), fila = null;
+      (r.sin_justificar || []).forEach(function (x) { if (x.folio === f) fila = x; });
+      pantallaJustificar(f, dia, fila);
+    };
+  });
+}
+
+/* ---------------- justificar una salida que quedó pendiente ---------------- */
+
+var JUSTIF = null;
+
+function pantallaJustificar(folio, volverA, datos) {
+  JUSTIF = { folio: folio, volverA: volverA, datos: datos || null, just: {} };
+  pintarJustificar();
+}
+
+function pintarJustificar() {
+  encabezado('Justificar la salida', JUSTIF.folio);
+  /* Quien justifica tiene que ver QUÉ está justificando. Un folio solo no
+     le dice nada a nadie tres días después. */
+  var d = JUSTIF.datos || {};
+  var ficha = '<div class="card"><h3>' + esc(d.paciente || '(sin paciente)') + '</h3>' +
+    '<p class="mini mono">' + esc(JUSTIF.folio) +
+      (d.hora ? ' · ' + esc(d.hora) : '') +
+      (d.piezas ? ' · ' + d.piezas + ' pieza(s)' : '') +
+      (d.ubic_nombre ? ' · ' + esc(d.ubic_nombre) : '') + '</p>' +
+    (d.problema ? '<div class="aviso a-warn">' + esc(d.problema) + '</div>' : '') +
+    '</div>';
+  /* Se reusa la misma tarjeta de la pantalla de aplicar, con el mismo
+     vocabulario: quien justifica aquí ya la vio allá. */
+  var guardado = APLIC;
+  APLIC = { just: JUSTIF.just, paciente: JUSTIF.paciente || '',
+            fechaCitas: JUSTIF.volverA, cita: null };
+  var html = tarjetaJustificacion();
+  var recordar;
+  pintar(ficha + html +
+    '<button class="b-dark" id="jGuardar">Guardar la justificación</button>' +
+    '<button class="b-ghost" id="jVolver">Volver sin guardar</button>');
+  cablearJustificacion(pintarJustificar);
+  recordar = APLIC.recordarJ;
+  APLIC = guardado;
+
+  $('jGuardar').onclick = async function () {
+    if (recordar) recordar();
+    var j = JUSTIF.just;
+    if (!j.tipo) return alertar('Falta decir por qué salió.');
+    if ((j.tipo === 'FOLIO' || j.tipo === 'PAQUETE') && !String(j.folio_cobro || '').trim()) {
+      return alertar('Falta el folio de cobro.');
+    }
+    if (j.tipo === 'DIRECTO' && !(Number(j.monto) > 0)) return alertar('Falta cuánto cobró.');
+
+    this.disabled = true; this.textContent = 'Guardando…';
+    var r;
+    try {
+      r = await enviar({ accion: 'justificar', folio: JUSTIF.folio, tipo: j.tipo,
+        folio_cobro: j.folio_cobro || '', folio_original: j.folio_original || '',
+        monto: j.monto || '', nota: j.nota || '', client_id: idCliente() }, true);
+    } catch (e) {
+      this.disabled = false; this.textContent = 'Guardar la justificación';
+      return alertar('No se guardó: ' + e.message);
+    }
+    if (!r.ok) {
+      this.disabled = false; this.textContent = 'Guardar la justificación';
+      return alertar(r.error);
+    }
+    pantallaCuadre(JUSTIF.volverA);
+  };
+  $('jVolver').onclick = function () { pantallaCuadre(JUSTIF.volverA); };
+}
+
 function ctxAplicacion() {
   return (estado.cat && estado.cat.aplicacion) || { activa: false, exclusiva: false, ubicaciones: [] };
 }
@@ -947,7 +1462,14 @@ async function abrirAplicar(ubicId) {
     '<button class="b-ghost" onclick="pantallaInicio()">Volver</button>');
 
   APLIC = { ubic_id: r.ubic_id, nombre: r.nombre, sede: r.sede || '', lotes: r.lotes,
-            pacientes: r.pacientes || [], lineas: [], client_id: idCliente() };
+            pacientes: r.pacientes || [], lineas: [], client_id: idCliente(),
+            /* La paciente sale de la cita, no del teclado. */
+            cita: null, cita_id: '', sinCita: false, just: {} };
+  pintarAplicar('');
+  /* La agenda se pide después de pintar: la pantalla ya sirve para poner
+     lotes mientras el calendario contesta, y si no contesta nunca, el
+     almacén no se queda bloqueado. */
+  await cargarCitasAplicar(hoyFront_());
   pintarAplicar('');
 }
 
@@ -990,15 +1512,9 @@ function pintarAplicar(busca) {
     ((ctxAplicacion().ubicaciones || []).length > 1
       ? ' <a href="#" id="aCambiar">Cambiar de almacén</a>.'
       : '') + '</p>' +
-    '<div class="campo"><label>Paciente</label>' +
-    '<input id="aPac" list="aPacLista" autocomplete="off" placeholder="Nombre completo" value="' +
-      esc(APLIC.paciente || '') + '">' +
-    '<datalist id="aPacLista">' +
-      APLIC.pacientes.map(function (n) { return '<option value="' + esc(n) + '">'; }).join('') +
-    '</datalist></div>' +
-    '<p class="mini">Escríbelo igual que en el expediente. Si ya se le aplicó algo antes, ' +
-    'aparece en la lista al teclear las primeras letras — conviene escogerlo de ahí para que ' +
-    'el historial de esa paciente no quede partido en dos nombres.</p></div>' +
+    '</p></div>' +
+
+    tarjetaCita() +
 
     (APLIC.lineas.length
       ? '<div class="card"><h3>' + APLIC.lineas.length + ' renglón(es) · ' +
@@ -1045,16 +1561,26 @@ function pintarAplicar(busca) {
     'después por qué salió esto.</p>' +
     '<textarea id="aNota" rows="2" placeholder="Opcional">' + esc(APLIC.nota || '') + '</textarea></div>' +
 
-    '<button class="b-dark" id="aGuardar"' + (APLIC.lineas.length ? '' : ' disabled') +
+    tarjetaJustificacion() +
+
+    '<div class="aviso a-info" id="aFalta" style="display:none"></div>' +
+    '<button class="b-dark" id="aGuardar" disabled' +
       '>Registrar la aplicación</button>' +
     '<button class="b-ghost" id="aV">Volver sin guardar</button>');
 
+  var repintar = function () { pintarAplicar($('aBusca') ? $('aBusca').value : ''); };
+  cablearCita(repintar);
+  cablearJustificacion(repintar);
+  actualizarFalta();
+
   function recordar() {
-    APLIC.paciente = $('aPac').value;
-    APLIC.nota = $('aNota').value;
+    /* `aPac` sólo existe cuando la paciente no está en la agenda. */
+    if ($('aPac')) APLIC.paciente = $('aPac').value;
+    if ($('aNota')) APLIC.nota = $('aNota').value;
+    if (APLIC.recordarJ) APLIC.recordarJ();
   }
-  $('aPac').oninput = recordar;
-  $('aNota').oninput = recordar;
+  if ($('aPac')) $('aPac').oninput = function () { recordar(); actualizarFalta(); };
+  if ($('aNota')) $('aNota').oninput = recordar;
 
   /* Cambiar de almacén tira los renglones puestos: son lotes del otro
      inventario y no se pueden arrastrar. Se avisa antes en vez de
@@ -1116,14 +1642,19 @@ function pintarAplicar(busca) {
 }
 
 async function guardarAplicacion() {
-  APLIC.paciente = $('aPac').value.trim();
-  APLIC.nota = $('aNota').value.trim();
-  if (!APLIC.paciente) return alertar('Falta el nombre de la paciente.');
-  if (!APLIC.lineas.length) return alertar('No has puesto nada.');
+  if ($('aPac')) APLIC.paciente = $('aPac').value.trim();
+  if ($('aNota')) APLIC.nota = $('aNota').value.trim();
+  if (APLIC.recordarJ) APLIC.recordarJ();
 
+  var falta = faltaParaAplicar();
+  if (falta) return alertar(falta);
+
+  var j = APLIC.just || {};
   var piezas = APLIC.lineas.reduce(function (a, x) { return a + Number(x.cantidad); }, 0);
   if (!confirm('Se van a descontar ' + piezas + ' pieza(s) de ' + APLIC.nombre +
-               ' a nombre de ' + APLIC.paciente + '. Esto no se deshace desde la app. ¿Registrar?')) return;
+               ' a nombre de ' + APLIC.paciente + ', como ' +
+               (JUST_TEXTO[j.tipo] ? JUST_TEXTO[j.tipo][0].toLowerCase() : j.tipo) +
+               '. Esto no se deshace desde la app. ¿Registrar?')) return;
 
   var b = $('aGuardar');
   b.disabled = true; b.textContent = 'Registrando…';
@@ -1131,6 +1662,10 @@ async function guardarAplicacion() {
   try {
     r = await enviar({ accion: 'aplicacion_guardar', ubic_id: APLIC.ubic_id,
       paciente: APLIC.paciente, nota: APLIC.nota,
+      cita_id: APLIC.cita_id || '',
+      justificacion: j.tipo || '', folio_cobro: j.folio_cobro || '',
+      folio_original: j.folio_original || '', monto_directo: j.monto || '',
+      nota_cobro: j.nota || '',
       lineas: APLIC.lineas.map(function (x) {
         return { sku: x.sku, lote_id: x.lote_id, cantidad: x.cantidad };
       }), client_id: APLIC.client_id }, true);
@@ -1148,6 +1683,16 @@ async function guardarAplicacion() {
     '<div class="aviso a-ok">' + (r.duplicado
       ? 'Esa aplicación ya estaba registrada. No se descontó dos veces.'
       : r.renglones + ' renglón(es) descontados de ' + esc(r.nombre_ubic) + '.') + '</div>' +
+    /* Si la justificación no pasó, el material igual salió: se dice cuál de
+       las dos cosas ocurrió en vez de dar un «listo» que tapa la mitad. */
+    (r.justificacion && r.justificacion.error
+      ? '<div class="aviso a-warn">La salida quedó registrada, pero sin justificar: ' +
+        esc(r.justificacion.error) + ' Sale en el cuadre hasta que se resuelva.</div>'
+      : (r.justificacion && r.justificacion.tipo && r.justificacion.tipo !== 'PENDIENTE'
+          ? '<div class="aviso a-info">Justificada como ' +
+            esc((JUST_TEXTO[r.justificacion.tipo] || [r.justificacion.tipo])[0].toLowerCase()) +
+            '.</div>'
+          : '')) +
     (r.duplicado ? '' :
       '<div class="card"><h3>' + esc(r.paciente) + '</h3>' +
       '<p class="mini mono">' + esc(r.folio) + ' · ' + esc(r.fecha) + '</p>' +
@@ -1250,7 +1795,9 @@ function pantallaInicio() {
     (aplicaActiva()
       ? '<button class="baldosa fuerte ancha" id="bAplicar">Aplicar a paciente' +
         '<span class="q">Descontar lo que se le aplicó</span></button>' +
-        '<button class="baldosa" id="bAplics">Aplicaciones<span class="q">Qué se le aplicó a quién</span></button>'
+        '<button class="baldosa" id="bAplics">Aplicaciones<span class="q">Qué se le aplicó a quién</span></button>' +
+        '<button class="baldosa" id="bCuadre">Cuadre del día' +
+          '<span class="q">Qué salió sin paciente o sin cobro</span></button>'
       : '') +
 
     /* La lista de compra ya no se esconde a quien tiene un solo almacén: le
@@ -1333,6 +1880,7 @@ function pantallaInicio() {
   if ($('bArmar')) $('bArmar').onclick = function () { pantallaSurtido(); };
   if ($('bAplicar')) $('bAplicar').onclick = function () { pantallaAplicar(); };
   if ($('bAplics')) $('bAplics').onclick = function () { pantallaAplicaciones(); };
+  if ($('bCuadre')) $('bCuadre').onclick = function () { pantallaCuadre(); };
   if ($('bCompra')) $('bCompra').onclick = function () { pantallaCompra(); };
   if ($('bMin')) $('bMin').onclick = function () { pantallaMinimos(); };
   if ($('bMin2')) $('bMin2').onclick = function () { pantallaMinimos(); };
