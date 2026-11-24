@@ -1846,6 +1846,147 @@ async function pantallaConteoMovs(id) {
 
 function selloCortoFront_(v) { return String(v || '').slice(0, 16); }
 
+/* =================================================================
+   Reporte de aplicaciones
+
+   Un solo reporte con varios cortes, no una pantalla por pregunta: la
+   operación quiere saber qué se aplicó esta semana y quien pone precios
+   quiere saber cuánto material cuesta en promedio un tratamiento. Es la
+   misma materia prima cortada distinto, y separarla en dos pantallas es
+   como terminan contradiciéndose a los seis meses.
+
+   El importe sólo aparece para quien puede ver costos. Para los demás el
+   reporte sigue sirviendo: cantidades, tratamientos y quién aplicó.
+   ================================================================= */
+
+var REPORTE = { periodo: 'dia', fecha: '' };
+
+async function pantallaReporte(periodo, fecha) {
+  REPORTE.periodo = periodo || REPORTE.periodo || 'dia';
+  REPORTE.fecha = fecha || REPORTE.fecha || hoyFront_();
+
+  encabezado('Reporte de aplicaciones', 'Qué se aplicó y qué costó en material');
+  pintar('<div class="card"><p class="sub">Cargando…</p></div>');
+
+  var r;
+  try {
+    r = await enviar({ accion: 'aplicaciones_reporte',
+                       periodo: REPORTE.periodo, fecha: REPORTE.fecha }, true);
+  } catch (e) {
+    return pintar('<div class="aviso a-err">Sin conexión.</div>' +
+      '<button class="b-ghost" onclick="pantallaInicio()">Volver</button>');
+  }
+  if (!r.ok) return pintar('<div class="aviso a-err">' + esc(r.error) + '</div>' +
+    '<button class="b-ghost" onclick="pantallaInicio()">Volver</button>');
+
+  var s = r.resumen;
+  var dinero = function (v) { return r.ve_costo && v !== null && v !== undefined ? pesos(v) : ''; };
+
+  pintar(
+    '<div class="card">' +
+    '<div class="rejilla">' +
+    ['dia', 'semana', 'mes'].map(function (k) {
+      var txt = k === 'dia' ? 'Día' : (k === 'semana' ? 'Semana' : 'Mes');
+      return '<button class="' + (REPORTE.periodo === k ? 'b-dark' : 'b-ghost') +
+        '" data-per="' + k + '">' + txt + '</button>';
+    }).join('') + '</div>' +
+    '<div class="campo"><label>Fecha de referencia</label>' +
+    '<input id="rFecha" type="date" value="' + esc(REPORTE.fecha) + '"></div>' +
+    '<p class="mini mono">' + esc(r.periodo.etiqueta) + ' · ' +
+      esc(r.periodo.desde) + ' al ' + esc(r.periodo.hasta) + '</p></div>' +
+
+    '<div class="card"><h3>' + s.aplicaciones + ' aplicación(es)</h3>' +
+    '<p class="mini">' + s.pacientes + ' paciente(s) · ' + s.piezas + ' pieza(s)' +
+      (r.ve_costo && s.importe !== null ? ' · <b>' + pesos(s.importe) + '</b> de material' : '') +
+      '</p>' +
+    (s.sin_justificar
+      ? '<p class="mini"><span class="pill p-crit">' + s.sin_justificar +
+        ' sin justificar</span></p>' : '') +
+    (s.retoques ? '<p class="mini">' + s.retoques + ' retoque(s)</p>' : '') +
+    '</div>' +
+
+    (r.aviso ? '<div class="aviso a-warn">' + esc(r.aviso) + '</div>' : '') +
+
+    (r.por_tratamiento.length
+      ? '<div class="card"><h3>Por tratamiento</h3>' +
+        (r.ve_costo
+          ? '<p class="mini">El promedio sale sólo de las aplicaciones costeadas al 100 %. ' +
+            'Es el número que sirve para sustentar un precio.</p>'
+          : '') +
+        r.por_tratamiento.map(function (t) {
+          return '<div class="fila-lote"><span class="t">' +
+            '<span class="n">' + esc(t.tratamiento) + '</span>' +
+            '<span class="c">' + t.aplicaciones + ' aplicación(es) · ' + t.piezas +
+              ' pieza(s) · ' + t.piezas_promedio + ' por aplicación' +
+              (r.ve_costo
+                ? (t.costo_promedio !== null
+                    ? ' · <b>' + pesos(t.costo_promedio) + '</b> en promedio'
+                    : ' · sin costo: ningún folio costeado')
+                : '') +
+              (t.sin_precio ? ' · ' + t.sin_precio + ' sin precio' : '') +
+              '</span></span></div>';
+        }).join('') + '</div>'
+      : '') +
+
+    (r.por_producto.length
+      ? '<div class="card"><h3>Por producto</h3>' +
+        r.por_producto.map(function (x) {
+          return '<div class="fila-lote"><span class="t">' +
+            '<span class="n">' + esc(x.nombre) + '</span>' +
+            '<span class="c">' + x.piezas + ' ' + esc(plural(x.unidad)) +
+              (r.ve_costo && x.importe !== null ? ' · ' + pesos(x.importe) : '') +
+              (x.completo ? '' : ' · falta precio de algún lote') +
+              '</span></span></div>';
+        }).join('') + '</div>'
+      : '') +
+
+    (r.por_quien.length > 1
+      ? '<div class="card"><h3>Quién registró</h3>' +
+        r.por_quien.map(function (x) {
+          return '<div class="fila-lote"><span class="t">' +
+            '<span class="n">' + esc(x.quien) + '</span>' +
+            '<span class="c">' + x.aplicaciones + ' aplicación(es) · ' + x.piezas +
+              ' pieza(s)</span></span></div>';
+        }).join('') + '</div>'
+      : '') +
+
+    (Object.keys(r.por_justificacion || {}).length
+      ? '<div class="card"><h3>Por razón de cobro</h3>' +
+        Object.keys(r.por_justificacion).map(function (k) {
+          var nom = (typeof JUST_TEXTO !== 'undefined' && JUST_TEXTO[k]) ? JUST_TEXTO[k][0] : k;
+          return '<div class="fila-lote"><span class="t">' +
+            '<span class="n">' + esc(nom) + '</span>' +
+            '<span class="c">' + r.por_justificacion[k] + ' aplicación(es)</span></span>' +
+            (k === 'PENDIENTE' ? '<span class="pill p-crit">sin resolver</span>' : '') +
+            '</div>';
+        }).join('') + '</div>'
+      : '') +
+
+    (r.detalle.length
+      ? '<details class="mas"><summary>Ver las ' + r.detalle.length +
+        ' aplicación(es) una por una</summary><div>' +
+        r.detalle.map(function (d) {
+          return '<div class="fila-lote"><span class="t">' +
+            '<span class="n">' + esc(d.paciente || '(sin paciente)') + '</span>' +
+            '<span class="c">' + esc(d.fecha) + ' · ' + esc(d.folio) +
+              (d.tratamiento ? ' · ' + esc(d.tratamiento) : '') +
+              ' · ' + d.piezas + ' pieza(s)' +
+              (r.ve_costo && d.importe !== null ? ' · ' + pesos(d.importe) : '') +
+              '</span></span>' +
+            (d.justificacion === 'PENDIENTE'
+              ? '<span class="pill p-crit">sin justificar</span>' : '') +
+            '</div>';
+        }).join('') + '</div></details>'
+      : '<div class="aviso a-info">No hubo aplicaciones en ese periodo.</div>') +
+
+    '<button class="b-ghost" onclick="pantallaInicio()">Volver</button>');
+
+  Array.prototype.forEach.call(document.querySelectorAll('[data-per]'), function (b) {
+    b.onclick = function () { pantallaReporte(this.getAttribute('data-per'), REPORTE.fecha); };
+  });
+  $('rFecha').onchange = function () { pantallaReporte(REPORTE.periodo, this.value); };
+}
+
 function ctxAplicacion() {
   return (estado.cat && estado.cat.aplicacion) || { activa: false, exclusiva: false, ubicaciones: [] };
 }
@@ -2108,6 +2249,10 @@ async function guardarAplicacion() {
     r = await enviar({ accion: 'aplicacion_guardar', ubic_id: APLIC.ubic_id,
       paciente: APLIC.paciente, nota: APLIC.nota,
       cita_id: APLIC.cita_id || '',
+      /* El tratamiento se copia de la cita y se guarda con el movimiento:
+         es lo que después permite saber cuánto material cuesta un Botox sin
+         volver a preguntarle a la agenda. */
+      procedimiento: (APLIC.cita && APLIC.cita.procedimiento) || '',
       justificacion: j.tipo || '', folio_cobro: j.folio_cobro || '',
       folio_original: j.folio_original || '', monto_directo: j.monto || '',
       nota_cobro: j.nota || '',
@@ -2244,7 +2389,9 @@ function pantallaInicio() {
         '<span class="q">Descontar lo que se le aplicó</span></button>' +
         '<button class="baldosa" id="bAplics">Aplicaciones<span class="q">Qué se le aplicó a quién</span></button>' +
         '<button class="baldosa" id="bCuadre">Cuadre del día' +
-          '<span class="q">Qué salió sin paciente o sin cobro</span></button>'
+          '<span class="q">Qué salió sin paciente o sin cobro</span></button>' +
+        '<button class="baldosa" id="bReporte">Reporte de aplicaciones' +
+          '<span class="q">Día, semana o mes · y qué cuesta cada tratamiento</span></button>'
       : '') +
 
     /* La lista de compra ya no se esconde a quien tiene un solo almacén: le
@@ -2329,6 +2476,7 @@ function pantallaInicio() {
   if ($('bAplicar')) $('bAplicar').onclick = function () { pantallaAplicar(); };
   if ($('bAplics')) $('bAplics').onclick = function () { pantallaAplicaciones(); };
   if ($('bCuadre')) $('bCuadre').onclick = function () { pantallaCuadre(); };
+  if ($('bReporte')) $('bReporte').onclick = function () { pantallaReporte('dia'); };
   if ($('bCompra')) $('bCompra').onclick = function () { pantallaCompra(); };
   if ($('bMin')) $('bMin').onclick = function () { pantallaMinimos(); };
   if ($('bMin2')) $('bMin2').onclick = function () { pantallaMinimos(); };
@@ -3359,8 +3507,10 @@ async function pantallaDotacionEditar(ubic) {
    enseña a ignorar los avisos. */
 /* El costo es información de margen: la ve quien dirige, no quien surte. */
 function puedeVerCostos() {
+  /* Regulatorio entró el 24 nov 2026: ve el costo de MATERIAL. No hay
+     margen que esconder porque esta app no conoce ningún precio de venta. */
   var r = String(estado.sesion && estado.sesion.rol).toUpperCase();
-  return r === 'DIRECTOR' || r === 'GERENCIA';
+  return r === 'DIRECTOR' || r === 'GERENCIA' || r === 'REGULATORIO';
 }
 
 /* Capturar precios no es lo mismo que ver el margen.
