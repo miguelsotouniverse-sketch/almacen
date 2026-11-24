@@ -1401,6 +1401,451 @@ function pintarJustificar() {
   $('jVolver').onclick = function () { pantallaCuadre(JUSTIF.volverA); };
 }
 
+/* =================================================================
+   Conteo físico
+
+   El motor de conteos lleva meses en el backend y nunca tuvo pantalla:
+   abrir un folio, congelar el saldo, comparar contra lo contado y escribir
+   los ajustes sólo se podía hacer desde el editor de Apps Script. Es decir,
+   la herramienta principal para cuadrar un almacén existía y nadie la podía
+   usar.
+
+   TRES REGLAS QUE LA PANTALLA TIENE QUE RESPETAR, PORQUE EL MOTOR LAS SUPONE
+
+   1. Un renglón en blanco NO es cero. «No lo conté» y «conté cero» son
+      cosas distintas: la primera deja el saldo como está, la segunda lo
+      pone en cero. Por eso sólo se mandan las claves donde alguien escribió
+      un número, y hay que teclear el cero a propósito.
+
+   2. El saldo se congela al abrir. Lo que el motor compara es contra el
+      número que había cuando se abrió el folio, no contra el de ahora. Si
+      entre el conteo y la autorización alguien aplicó algo, el plan cambia
+      y la pantalla se detiene en vez de escribir.
+
+   3. Nada se escribe hasta que alguien autoriza. Abrir un conteo no mueve
+      inventario; deja un documento. Se revisa el plan —qué movimientos
+      exactos va a escribir— y hasta entonces se aplica.
+   ================================================================= */
+
+var CONTEO = null;
+
+var CONTEO_CLASES_UI = {
+  AJUSTE:   ['Ajuste', 'No se sabe a dónde se fue. Sale del almacén a la cuenta de ajustes.'],
+  SALIDA:   ['Se consumió', 'Se usó y nadie lo descontó. Sale como consumo.'],
+  TRASPASO: ['Se movió', 'Está en otro lado. Se traspasa a esa ubicación.'],
+  LIBRO:    ['Al libro', 'Es un controlado: no se ajusta aquí, se resuelve en el libro.']
+};
+
+/* ---------------- la lista de conteos ---------------- */
+
+async function pantallaConteos() {
+  encabezado('Conteo físico', 'Lo del anaquel contra lo del sistema');
+  pintar('<div class="card"><p class="sub">Cargando…</p></div>');
+  var r;
+  try {
+    r = await enviar({ accion: 'conteo_lista' }, true);
+  } catch (e) {
+    return pintar('<div class="aviso a-err">Sin conexión.</div>' +
+      '<button class="b-ghost" onclick="pantallaInicio()">Volver</button>');
+  }
+  if (!r.ok) return pintar('<div class="aviso a-err">' + esc(r.error) + '</div>' +
+    '<button class="b-ghost" onclick="pantallaInicio()">Volver</button>');
+
+  pintar(
+    '<div class="card"><h3>Qué es esto</h3>' +
+    '<p class="mini">Contar el anaquel y comparar contra lo que dice el sistema. Abrir un ' +
+    'conteo <b>no mueve nada</b>: deja un documento con lo que se contó. Los ajustes se ' +
+    'escriben hasta que alguien revisa el plan y lo autoriza.</p></div>' +
+    '<button class="b-dark" id="nConteo">Abrir un conteo</button>' +
+    (r.conteos.length
+      ? r.conteos.map(function (c) {
+          var abierto = String(c.estado).toUpperCase() === 'ABIERTO';
+          var anulado = String(c.estado).toUpperCase() === 'ANULADO';
+          return '<div class="card"><h3>' + esc(c.conteo_id) + '</h3>' +
+            '<p class="mini mono">' + esc(c.fecha) + ' · ' + esc(c.almacen || '') +
+              ' · contó ' + esc(c.contado_por || '—') + '</p>' +
+            '<p class="mini">' + c.lineas + ' renglón(es) · ' + c.difieren + ' con diferencia · ' +
+              c.aplicadas + ' aplicada(s)</p>' +
+            (anulado ? '<span class="pill p-crit">anulado</span>'
+                     : (abierto ? '<span class="pill p-warn">abierto</span>'
+                                : '<span class="pill p-ok">cerrado</span>')) +
+            '<button class="b-ghost" data-ver="' + esc(c.conteo_id) + '">' +
+              (abierto ? 'Revisar y aplicar' : 'Ver qué dejó') + '</button></div>';
+        }).join('')
+      : '<div class="aviso a-info">Todavía no se ha hecho ningún conteo.</div>') +
+    '<button class="b-ghost" onclick="pantallaInicio()">Volver</button>');
+
+  $('nConteo').onclick = function () { pantallaConteoNuevo(); };
+  Array.prototype.forEach.call(document.querySelectorAll('[data-ver]'), function (b) {
+    b.onclick = function () { pantallaConteoPlan(this.getAttribute('data-ver')); };
+  });
+}
+
+/* ---------------- capturar lo contado ---------------- */
+
+async function pantallaConteoNuevo(ubicId) {
+  encabezado('Conteo físico', 'Qué hay de verdad en el anaquel');
+  pintar('<div class="card"><p class="sub">Cargando existencias…</p></div>');
+
+  var almacenes = ((estado.cat || {}).almacenes || []).filter(function (u) {
+    return alcanceCubreFront_(u.ubic_id || u.id);
+  });
+  var ubic = ubicId || (almacenes[0] || {}).ubic_id || (almacenes[0] || {}).id || '';
+  if (!ubic) return pintar('<div class="aviso a-err">No hay almacén al que llegues.</div>' +
+    '<button class="b-ghost" onclick="pantallaConteos()">Volver</button>');
+
+  var r;
+  try {
+    r = await enviar({ accion: 'existencias', almacen: ubic }, true);
+  } catch (e) {
+    return pintar('<div class="aviso a-err">Sin conexión. Un conteo necesita señal: ' +
+      'compara contra la existencia real.</div>' +
+      '<button class="b-ghost" onclick="pantallaConteos()">Volver</button>');
+  }
+  if (!r.ok) return pintar('<div class="aviso a-err">' + esc(r.error) + '</div>' +
+    '<button class="b-ghost" onclick="pantallaConteos()">Volver</button>');
+
+  /* El conteo es por CLAVE, no por lote: quien cuenta ve frascos en el
+     anaquel, no folios. El reparto entre lotes lo hace el motor por
+     caducidad, que es lo que haría una persona bien. */
+  /* La unidad y si es controlado no vienen con la existencia: vienen del
+     catálogo, que la app ya trae cargado. */
+  var ficha = {};
+  ((estado.cat || {}).catalogo || []).forEach(function (c) {
+    ficha[String(c.sku).toUpperCase()] = c;
+  });
+
+  var porSku = {};
+  (r.existencias || []).forEach(function (x) {
+    if (String(x.ubic_id).toUpperCase() !== String(ubic).toUpperCase()) return;
+    var k = String(x.sku).toUpperCase();
+    var f = ficha[k] || {};
+    if (!porSku[k]) porSku[k] = { sku: k, nombre: x.nombre || f.nombre || k,
+                                  unidad: f.unidad_base || 'pieza',
+                                  controlado: String(f.controlado || '').toUpperCase() === 'SI',
+                                  sistema: 0, lotes: 0 };
+    porSku[k].sistema = Math.round((porSku[k].sistema + Number(x.cantidad || 0)) * 1000) / 1000;
+    porSku[k].lotes++;
+  });
+
+  var elegido = null;
+  almacenes.forEach(function (u) { if ((u.ubic_id || u.id) === ubic) elegido = u; });
+  CONTEO = { ubic_id: ubic, nombre: (elegido || almacenes[0] || {}).nombre || ubic,
+             almacenes: almacenes, filas: Object.keys(porSku).map(function (k) { return porSku[k]; }),
+             contado: {}, clase: {}, nota: {}, destino: {},
+             contado_por: '', notaFolio: '', client_id: idCliente() };
+  CONTEO.filas.sort(function (a, b) { return String(a.nombre).localeCompare(String(b.nombre)); });
+  pintarConteoNuevo('');
+}
+
+function alcanceCubreFront_(u) {
+  var a = (estado.cat || {}).alcance;
+  if (!a || !a.length) return true;
+  return a.indexOf(String(u || '').toUpperCase()) >= 0;
+}
+
+function pintarConteoNuevo(busca) {
+  var q = plano(busca || '');
+  var hay = CONTEO.filas.filter(function (x) {
+    if (!q) return true;
+    return plano(x.sku + ' ' + x.nombre).indexOf(q) >= 0;
+  });
+  var capturadas = Object.keys(CONTEO.contado).filter(function (k) {
+    return CONTEO.contado[k] !== '' && CONTEO.contado[k] !== undefined;
+  });
+  var difieren = capturadas.filter(function (k) {
+    var f = null;
+    CONTEO.filas.forEach(function (x) { if (x.sku === k) f = x; });
+    return f && Math.abs(Number(CONTEO.contado[k]) - f.sistema) > 0.0001;
+  });
+
+  pintar(
+    '<div class="card"><h3>' + esc(CONTEO.nombre) + '</h3>' +
+    (CONTEO.almacenes.length > 1
+      ? '<div class="campo"><label>Almacén</label><select id="kUbic">' +
+        CONTEO.almacenes.map(function (u) {
+          var id = u.ubic_id || u.id;
+          return '<option value="' + esc(id) + '"' +
+            (id === CONTEO.ubic_id ? ' selected' : '') + '>' + esc(u.nombre || id) + '</option>';
+        }).join('') + '</select></div>'
+      : '') +
+    '<p class="mini">Escriba lo que <b>contó</b> de cada clave. Lo que deje en blanco se ' +
+    'entiende como <b>«no lo conté»</b> y no se toca: para dejar algo en cero hay que ' +
+    'teclear el cero.</p>' +
+    '<div class="campo"><label>Quién contó</label>' +
+    '<input id="kQuien" autocomplete="off" placeholder="Nombre de quien contó el anaquel" value="' +
+      esc(CONTEO.contado_por || '') + '"></div></div>' +
+
+    '<div class="card"><h3>' + capturadas.length + ' de ' + CONTEO.filas.length +
+      ' claves capturadas' + (difieren.length ? ' · ' + difieren.length + ' con diferencia' : '') +
+      '</h3>' +
+    '<div class="buscador"><input id="kBusca" placeholder="Filtrar por nombre o clave" ' +
+      'autocomplete="off" value="' + esc(busca || '') + '"></div>' +
+    (hay.length
+      ? hay.map(function (x) {
+          var val = CONTEO.contado[x.sku];
+          var puesto = val !== '' && val !== undefined;
+          var dif = puesto ? Math.round((Number(val) - x.sistema) * 1000) / 1000 : null;
+          var cl = CONTEO.clase[x.sku] || (x.controlado ? 'LIBRO' : 'AJUSTE');
+          return '<div class="fila-lote"><span class="t">' +
+            '<span class="n">' + esc(x.nombre) + '</span>' +
+            '<span class="c">' + esc(x.sku) + ' · el sistema dice ' + x.sistema + ' ' +
+              esc(plural(x.unidad)) + ' en ' + x.lotes + ' lote(s)' +
+              (dif !== null && dif !== 0
+                ? ' · <b>' + (dif > 0 ? 'sobran ' + dif : 'faltan ' + (-dif)) + '</b>'
+                : (puesto ? ' · cuadra' : '')) + '</span></span>' +
+            (x.controlado ? '<span class="pill p-crit">libro</span>' : '') +
+            '<input class="kC" data-sku="' + esc(x.sku) + '" type="number" inputmode="decimal" ' +
+              'min="0" step="any" placeholder="—" style="width:5.5em;margin:0" value="' +
+              esc(puesto ? String(val) : '') + '">' +
+            '</div>' +
+            (dif !== null && dif !== 0 && !x.controlado
+              ? '<div class="campo" style="margin:0 0 10px 0"><label>¿Qué pasó con ' +
+                esc(x.nombre) + '?</label><select class="kK" data-sku="' + esc(x.sku) + '">' +
+                Object.keys(CONTEO_CLASES_UI).filter(function (k) { return k !== 'LIBRO'; })
+                  .map(function (k) {
+                    return '<option value="' + k + '"' + (cl === k ? ' selected' : '') + '>' +
+                      esc(CONTEO_CLASES_UI[k][0]) + '</option>';
+                  }).join('') + '</select>' +
+                '<p class="mini">' + esc((CONTEO_CLASES_UI[cl] || ['', ''])[1]) + '</p>' +
+                (cl === 'TRASPASO'
+                  ? '<input class="kD" data-sku="' + esc(x.sku) + '" autocomplete="off" ' +
+                    'placeholder="Clave de la ubicación a donde se movió" value="' +
+                    esc(CONTEO.destino[x.sku] || '') + '">'
+                  : '') +
+                '<input class="kN" data-sku="' + esc(x.sku) + '" autocomplete="off" ' +
+                  'placeholder="Nota (opcional)" value="' + esc(CONTEO.nota[x.sku] || '') + '">' +
+                '</div>'
+              : '');
+        }).join('')
+      : '<p class="mini">' + (busca ? 'Nada con eso.' : 'Este almacén no tiene existencia.') +
+        '</p>') +
+    '</div>' +
+
+    '<div class="card"><h3>Nota del conteo</h3>' +
+    '<textarea id="kNota" rows="2" placeholder="Opcional">' + esc(CONTEO.notaFolio || '') +
+    '</textarea></div>' +
+
+    (capturadas.length
+      ? '<div class="aviso a-info">Se van a mandar <b>' + capturadas.length + '</b> clave(s), ' +
+        'las que tienen número. Las otras ' + (CONTEO.filas.length - capturadas.length) +
+        ' se quedan como están.</div>'
+      : '<div class="aviso a-warn">Todavía no has capturado ninguna clave.</div>') +
+    '<button class="b-dark" id="kAbrir"' + (capturadas.length ? '' : ' disabled') +
+      '>Abrir el conteo</button>' +
+    '<button class="b-ghost" id="kV">Volver sin guardar</button>');
+
+  function recordar() {
+    if ($('kQuien')) CONTEO.contado_por = $('kQuien').value;
+    if ($('kNota')) CONTEO.notaFolio = $('kNota').value;
+    Array.prototype.forEach.call(document.querySelectorAll('.kC'), function (i) {
+      CONTEO.contado[i.getAttribute('data-sku')] = i.value;
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('.kK'), function (i) {
+      CONTEO.clase[i.getAttribute('data-sku')] = i.value;
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('.kD'), function (i) {
+      CONTEO.destino[i.getAttribute('data-sku')] = i.value;
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('.kN'), function (i) {
+      CONTEO.nota[i.getAttribute('data-sku')] = i.value;
+    });
+  }
+  CONTEO.recordar = recordar;
+
+  if ($('kQuien')) $('kQuien').oninput = recordar;
+  if ($('kNota')) $('kNota').oninput = recordar;
+  Array.prototype.forEach.call(document.querySelectorAll('.kC'), function (i) {
+    i.onchange = function () { recordar(); pintarConteoNuevo($('kBusca') ? $('kBusca').value : ''); };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('.kK'), function (i) {
+    i.onchange = function () { recordar(); pintarConteoNuevo($('kBusca') ? $('kBusca').value : ''); };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('.kD'), function (i) { i.oninput = recordar; });
+  Array.prototype.forEach.call(document.querySelectorAll('.kN'), function (i) { i.oninput = recordar; });
+
+  if ($('kUbic')) $('kUbic').onchange = function () {
+    if (Object.keys(CONTEO.contado).length &&
+        !confirm('Cambiar de almacén borra lo que llevas capturado. ¿Seguir?')) {
+      this.value = CONTEO.ubic_id; return;
+    }
+    pantallaConteoNuevo(this.value);
+  };
+  $('kBusca').onkeydown = function (e) {
+    if (e.key === 'Enter') { recordar(); pintarConteoNuevo(this.value); }
+  };
+  $('kBusca').onchange = function () { recordar(); pintarConteoNuevo(this.value); };
+  $('kAbrir').onclick = abrirConteo;
+  $('kV').onclick = function () { pantallaConteos(); };
+}
+
+async function abrirConteo() {
+  CONTEO.recordar();
+  if (!String(CONTEO.contado_por || '').trim()) {
+    return alertar('Falta quién contó. Un ajuste de inventario no va sin nombre.');
+  }
+
+  var lineas = [];
+  CONTEO.filas.forEach(function (x) {
+    var v = CONTEO.contado[x.sku];
+    if (v === '' || v === undefined || v === null) return;   // no contada: no se toca
+    var n = Number(v);
+    if (!(n >= 0)) return;
+    lineas.push({ ubic_id: CONTEO.ubic_id, sku: x.sku, contado: n,
+                  clase: x.controlado ? 'LIBRO' : (CONTEO.clase[x.sku] || 'AJUSTE'),
+                  destino: CONTEO.destino[x.sku] || '',
+                  nota: CONTEO.nota[x.sku] || '' });
+  });
+  if (!lineas.length) return alertar('No capturaste ninguna clave.');
+
+  if (!confirm('Se va a abrir un conteo con ' + lineas.length + ' clave(s). Todavía no se ' +
+               'mueve nada: el ajuste se escribe hasta que lo revises y lo autorices. ¿Seguir?')) return;
+
+  var b = $('kAbrir');
+  b.disabled = true; b.textContent = 'Abriendo…';
+  var r;
+  try {
+    /* `almacen` es el campo que el motor guarda en la cabecera del folio;
+       cada línea lleva además su propia ubicación. */
+    r = await enviar({ accion: 'conteo_abrir', almacen: CONTEO.ubic_id,
+      contado_por: CONTEO.contado_por.trim(), nota: CONTEO.notaFolio || '',
+      lineas: lineas, client_id: CONTEO.client_id }, true);
+  } catch (e) {
+    b.disabled = false; b.textContent = 'Abrir el conteo';
+    return alertar('No se abrió: ' + e.message);
+  }
+  if (!r.ok) {
+    b.disabled = false; b.textContent = 'Abrir el conteo';
+    if (r.problemas && r.problemas.length) {
+      return pintar('<div class="aviso a-err">' + esc(r.error) + '</div>' +
+        '<div class="card">' + r.problemas.map(function (x) {
+          return '<p class="mini">· ' + esc(x) + '</p>';
+        }).join('') + (r.mas ? '<p class="mini">y ' + r.mas + ' más</p>' : '') + '</div>' +
+        '<button class="b-ghost" onclick="pintarConteoNuevo(\'\')">Corregir</button>');
+    }
+    return alertar(r.error);
+  }
+  pantallaConteoPlan(r.conteo_id);
+}
+
+/* ---------------- el plan, y aplicarlo ---------------- */
+
+var ESTADO_UI = {
+  LISTA:       ['p-warn', 'va a ajustar'],
+  CUADRA:      ['p-ok', 'cuadra'],
+  BLOQUEADA:   ['p-crit', 'no se puede'],
+  AL_LIBRO:    ['p-info', 'al libro'],
+  YA_APLICADA: ['p-ok', 'ya aplicada']
+};
+
+async function pantallaConteoPlan(id) {
+  encabezado('Conteo ' + id, 'Qué va a escribir, antes de escribirlo');
+  pintar('<div class="card"><p class="sub">Armando el plan…</p></div>');
+  var r;
+  try {
+    r = await enviar({ accion: 'conteo_previo', conteo_id: id }, true);
+  } catch (e) {
+    return pintar('<div class="aviso a-err">Sin conexión.</div>' +
+      '<button class="b-ghost" onclick="pantallaConteos()">Volver</button>');
+  }
+  if (!r.ok) return pintar('<div class="aviso a-err">' + esc(r.error) + '</div>' +
+    '<button class="b-ghost" onclick="pantallaConteos()">Volver</button>');
+
+  var s = r.resumen || {};
+  var cerrado = String(r.estado || '').toUpperCase() !== 'ABIERTO';
+
+  pintar(
+    '<div class="card"><h3>' + esc(r.conteo_id) + '</h3>' +
+    '<p class="mini mono">' + esc(r.fecha || '') + ' · contó ' + esc(r.contado_por || '—') + '</p>' +
+    '<p class="mini">' + (s.CUADRA || 0) + ' cuadran · ' + (s.LISTA || 0) + ' por ajustar · ' +
+      (s.BLOQUEADA || 0) + ' bloqueadas · ' + (s.AL_LIBRO || 0) + ' al libro · ' +
+      (s.YA_APLICADA || 0) + ' ya aplicadas</p>' +
+    (r.nota ? '<p class="mini">' + esc(r.nota) + '</p>' : '') + '</div>' +
+
+    (r.avisos && r.avisos.length
+      ? '<div class="aviso a-warn">' + r.avisos.map(esc).join('<br>') + '</div>' : '') +
+
+    (r.movimientos
+      ? '<div class="aviso a-info">Autorizar esto escribe <b>' + r.movimientos +
+        ' movimiento(s)</b> de inventario. No se deshacen desde la app: se corrigen con otro ' +
+        'conteo o anulando el folio.</div>'
+      : '') +
+
+    r.plan.map(function (x) {
+      var ui = ESTADO_UI[x.estado] || ['p-neutral', x.estado];
+      return '<div class="card"><h3>' + esc(x.nombre || x.sku) + '</h3>' +
+        '<p class="mini mono">' + esc(x.sku) + ' · sistema ' + x.sistema + ' · contado ' +
+          x.contado + ' · ' + (x.diferencia > 0 ? 'sobran ' + x.diferencia
+            : (x.diferencia < 0 ? 'faltan ' + (-x.diferencia) : 'cuadra')) + '</p>' +
+        '<span class="pill ' + ui[0] + '">' + esc(ui[1]) + '</span>' +
+        (x.porque ? '<p class="mini">' + esc(x.porque) + '</p>' : '') +
+        (x.nota ? '<p class="mini">' + esc(x.nota) + '</p>' : '') +
+        (x.movs && x.movs.length
+          ? x.movs.map(function (m) {
+              return '<div class="fila-lote"><span class="t">' +
+                '<span class="n">' + esc(m.tipo) + ' · ' + m.cantidad + '</span>' +
+                '<span class="c">' + esc(m.lote_id) +
+                  (m.caducidad ? ' · cad ' + esc(m.caducidad) : '') +
+                  ' · ' + esc(m.ubic_origen) + (m.ubic_destino ? ' → ' + esc(m.ubic_destino) : '') +
+                  '</span></span></div>';
+            }).join('')
+          : '') + '</div>';
+    }).join('') +
+
+    ((s.LISTA || 0) && !cerrado
+      ? '<button class="b-dark" id="kAplicar">Autorizar y aplicar ' + (s.LISTA || 0) + ' ajuste(s)</button>'
+      : '') +
+    ((s.YA_APLICADA || 0)
+      ? '<button class="b-ghost" id="kMovs">Ver los movimientos que dejó</button>' : '') +
+    '<button class="b-ghost" onclick="pantallaConteos()">Volver</button>');
+
+  if ($('kAplicar')) $('kAplicar').onclick = async function () {
+    if (!confirm('Se van a escribir ' + r.movimientos + ' movimiento(s) de inventario a su ' +
+                 'nombre. ¿Autorizar?')) return;
+    this.disabled = true; this.textContent = 'Aplicando…';
+    var a;
+    try {
+      a = await enviar({ accion: 'conteo_aplicar', conteo_id: r.conteo_id,
+                         movimientos_esperados: r.movimientos }, true);
+    } catch (e) {
+      return alertar('No se aplicó: ' + e.message);
+    }
+    if (!a.ok) return alertar(a.error);
+    alertar(a.mensaje || 'Aplicado.');
+    pantallaConteoPlan(r.conteo_id);
+  };
+  if ($('kMovs')) $('kMovs').onclick = function () { pantallaConteoMovs(r.conteo_id); };
+}
+
+async function pantallaConteoMovs(id) {
+  encabezado('Conteo ' + id, 'Qué quedó escrito');
+  pintar('<div class="card"><p class="sub">Cargando…</p></div>');
+  var r;
+  try {
+    r = await enviar({ accion: 'conteo_movimientos', conteo_id: id }, true);
+  } catch (e) {
+    return pintar('<div class="aviso a-err">Sin conexión.</div>' +
+      '<button class="b-ghost" onclick="pantallaConteos()">Volver</button>');
+  }
+  if (!r.ok) return pintar('<div class="aviso a-err">' + esc(r.error) + '</div>' +
+    '<button class="b-ghost" onclick="pantallaConteos()">Volver</button>');
+
+  pintar(
+    (r.movimientos.length
+      ? '<div class="card"><h3>' + r.movimientos.length + ' movimiento(s)</h3>' +
+        r.movimientos.map(function (m) {
+          return '<div class="fila-lote"><span class="t">' +
+            '<span class="n">' + esc(m.nombre || m.sku) + ' · ' + m.cantidad + '</span>' +
+            '<span class="c">' + esc(m.tipo) + ' · ' + esc(m.lote_id) + ' · ' +
+              esc(selloCortoFront_(m.timestamp)) + ' · ' + esc(m.usuario || '') + '</span></span>' +
+            (m.reversa ? '<span class="pill p-crit">reversa</span>' : '') + '</div>';
+        }).join('') + '</div>'
+      : '<div class="aviso a-info">Ese conteo no dejó movimientos.</div>') +
+    '<button class="b-ghost" onclick="pantallaConteos()">Volver</button>');
+}
+
+function selloCortoFront_(v) { return String(v || '').slice(0, 16); }
+
 function ctxAplicacion() {
   return (estado.cat && estado.cat.aplicacion) || { activa: false, exclusiva: false, ubicaciones: [] };
 }
@@ -1783,6 +2228,8 @@ function pantallaInicio() {
     '<button class="baldosa fuerte ancha" id="bNueva">Nueva recepción' +
       '<span class="q">Todo lo que entra al almacén pasa por aquí</span></button>' +
     '<button class="baldosa" id="bExist">Existencias<span class="q">Qué hay y dónde</span></button>' +
+    '<button class="baldosa" id="bConteo">Conteo físico' +
+      '<span class="q">Lo del anaquel contra lo del sistema</span></button>' +
 
     /* Donde el material se aplica a la paciente, lo de quirófano no existe:
        no hay caja que abrir, ni plantilla que comparar, ni caso agendado del
@@ -1875,6 +2322,7 @@ function pantallaInicio() {
     pantallaCabecera();
   };
   $('bExist').onclick = function () { pantallaExistencias(''); };
+  if ($('bConteo')) $('bConteo').onclick = function () { pantallaConteos(); };
   /* Con guarda: estas fichas ya no están en todas las portadas. */
   if ($('bCajas')) $('bCajas').onclick = function () { pantallaCajas(); };
   if ($('bArmar')) $('bArmar').onclick = function () { pantallaSurtido(); };
