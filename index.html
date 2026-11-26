@@ -1025,13 +1025,18 @@ function tarjetaCita() {
 function cablearCita(repintar) {
   if ($('cCambiar')) $('cCambiar').onclick = function () {
     APLIC.cita = null; APLIC.cita_id = ''; APLIC.paciente = '';
+    APLIC.pac = null; APLIC.pacHits = []; APLIC.pacBuscado = false;
+    APLIC.pacQ = undefined; APLIC.entorno = '';
     repintar();
   };
   if ($('cSinCita')) $('cSinCita').onclick = function () {
     APLIC.sinCita = true; repintar();
   };
   if ($('cVolverAgenda')) $('cVolverAgenda').onclick = function () {
-    APLIC.sinCita = false; APLIC.paciente = ''; repintar();
+    APLIC.sinCita = false; APLIC.paciente = '';
+    APLIC.pac = null; APLIC.pacHits = []; APLIC.pacBuscado = false;
+    APLIC.pacQ = undefined;
+    repintar();
   };
   if ($('cFecha')) $('cFecha').onchange = async function () {
     await cargarCitasAplicar(this.value); repintar();
@@ -1052,6 +1057,12 @@ function cablearCita(repintar) {
       APLIC.cita_id = hallada.id;
       APLIC.paciente = hallada.paciente || '';
       APLIC.sinCita = false;
+      /* Se intenta identificarla sola con el nombre de la agenda. Es una
+         llamada de lectura y no bloquea: la pantalla ya sirve para poner
+         lotes mientras la base contesta. */
+      APLIC.pac = null; APLIC.pacHits = []; APLIC.pacBuscado = false;
+      APLIC.pacQ = undefined;
+      buscarIdentidad(APLIC.paciente, true, repintar);
       /* Un retoque lo marca la agenda sola: no hay por qué pedirle a nadie
          que lo declare, y preseleccionarlo evita que lo deje en pendiente
          por flojera. */
@@ -1070,6 +1081,192 @@ var JUST_TEXTO = {
   DIRECTO:   ['Cobro directo de la médica', 'No pasa por el sistema de cobros. Se captura a mano.'],
   PENDIENTE: ['Todavía no se sabe', 'Queda en rojo en el cuadre hasta que alguien lo resuelva.']
 };
+
+/* =================================================================
+   Quién es la paciente, y dónde se le aplicó
+
+   Dos tarjetas que se agregan a la pantalla de aplicar, y que son el
+   mismo arreglo: que el movimiento guarde llaves en vez de texto.
+
+   IDENTIDAD. La agenda da un nombre; cobros y el expediente no buscan
+   por nombre, buscan por número. Así que al escoger la cita se busca
+   ese nombre en la base de pacientes y, si hay una sola que se llame
+   exactamente así, se amarra sola —sin preguntar nada, porque no hay
+   nada que decidir—. Si hay varias o ninguna, ahí sí se pregunta, con
+   los últimos cuatro del teléfono a la vista para poder distinguirlas.
+
+   Y si la base no se puede leer, se guarda por nombre como siempre y se
+   dice por qué. Un permiso pendiente no puede impedir que se registre
+   material que ya salió: eso cambiaría un problema de cuadre por un
+   hueco en el kardex.
+
+   ENTORNO. Cabina o quirófano, y no viene preseleccionado a propósito.
+   Si trajera un valor por omisión, el sistema creería que alguien lo
+   dijo cuando nadie lo vio, y el cruce con el expediente declararía
+   faltante una nota que sí existe en Renasté. Un tap contra acusar a
+   alguien de no documentar: gana el tap.
+   ================================================================= */
+
+var ENTORNO_TEXTO = {
+  CABINA:    ['Cabina o consultorio', 'La nota va al expediente del consultorio.'],
+  QUIROFANO: ['Quirófano', 'Con sedación. La nota va al expediente de la sede.']
+};
+
+/* ---------------- identidad de la paciente ---------------- */
+
+function tarjetaIdentidad() {
+  var quien = String(APLIC.paciente || '').trim();
+  if (!quien && !APLIC.sinCita) return '';          // todavía no hay a quién buscar
+
+  /* Ya identificada. */
+  if (APLIC.pac) {
+    return '<div class="card"><h3>' + esc(APLIC.pac.nombre) + '</h3>' +
+      '<p class="mini mono">Nº ' + esc(APLIC.pac.id) +
+        (APLIC.pac.folio ? ' · ' + esc(APLIC.pac.folio) : '') + '</p>' +
+      '<p class="mini">Con esto el cobro y la nota clínica de esta aplicación se ' +
+      'encuentran solos, sin depender de cómo esté escrito el nombre.</p>' +
+      '<button class="b-ghost" id="pCambiar" style="margin-top:8px">No es ella</button></div>';
+  }
+
+  if (APLIC.pacBuscando) {
+    return '<div class="card"><h3>Identificar a la paciente</h3>' +
+      '<p class="sub">Buscándola en la base…</p></div>';
+  }
+
+  /* La base no se pudo leer. Se sigue pudiendo guardar. */
+  if (APLIC.pacSinBase) {
+    return '<div class="card"><h3>Identificar a la paciente</h3>' +
+      '<div class="aviso a-warn">No se puede leer la base de pacientes desde aquí, ' +
+      'así que esta aplicación se va a guardar con el nombre escrito, como antes. ' +
+      'Se registra igual; lo único que cuesta es que el cobro y la nota se van a ' +
+      'tener que amarrar a mano.</div>' +
+      '<p class="mini">' + esc(APLIC.pacSinBase) + '</p></div>';
+  }
+
+  var hits = APLIC.pacHits || [];
+  return '<div class="card"><h3>Identificar a la paciente</h3>' +
+    '<p class="mini">Escoge a ' + esc(quien || 'la paciente') + ' de la base. De ahí ' +
+    'sale su número, que es con lo que se amarra el cobro y la nota.</p>' +
+    '<div class="buscador">' +
+    '<input id="pBusca" autocomplete="off" placeholder="Nombre o teléfono" value="' +
+      esc(APLIC.pacQ !== undefined ? APLIC.pacQ : quien) + '">' +
+    '<button class="b-dark" id="pBuscar" style="width:auto;margin:0">Buscar</button></div>' +
+    (APLIC.pacBuscado && !hits.length
+      ? '<div class="aviso a-warn">Nadie con eso en la base. Si es paciente nueva, hay ' +
+        'que darla de alta primero; mientras, se puede registrar con el nombre escrito.</div>'
+      : '') +
+    hits.map(function (x) {
+      return '<div class="fila-lote"><span class="t">' +
+        '<span class="n">' + esc(x.nombre) + '</span>' +
+        '<span class="c">Nº ' + esc(x.id) +
+          (x.tel4 ? ' · tel …' + esc(x.tel4) : '') +
+          (x.folio ? '' : ' · sin expediente') + '</span></span>' +
+        '<button class="b-dark" data-pac="' + esc(x.id) +
+          '" style="width:auto;margin:0">Es ella</button></div>';
+    }).join('') +
+    (APLIC.pacRecortado
+      ? '<p class="mini">Hay más de quince. Escribe más letras o el teléfono.</p>'
+      : '') +
+    '<p class="mini">Se puede guardar sin esto, pero entonces el cobro y la nota ' +
+    'se amarran a mano.</p></div>';
+}
+
+/** Busca en la base. `auto` = se amarra sola si hay una sola coincidencia exacta. */
+async function buscarIdentidad(q, auto, repintar) {
+  var texto = String(q || '').trim();
+  APLIC.pacQ = texto;
+  if (texto.length < 3) {
+    APLIC.pacHits = []; APLIC.pacBuscado = false;
+    if (repintar) repintar();
+    return;
+  }
+
+  APLIC.pacBuscando = true; APLIC.pacSinBase = '';
+  if (repintar) repintar();
+
+  var r;
+  try {
+    r = await enviar({ accion: 'pacientes_buscar', q: texto }, true);
+  } catch (e) {
+    r = { ok: false, sin_base: true, error: 'Sin señal para leer la base de pacientes.' };
+  }
+  APLIC.pacBuscando = false;
+  APLIC.pacBuscado = true;
+
+  if (!r.ok) {
+    /* Sólo es «sin base» si de verdad no se pudo abrir. Un «escribe tres
+       letras» no es eso y no debe apagar el buscador. */
+    if (r.sin_base) { APLIC.pacSinBase = r.error || 'No se pudo leer la base.'; }
+    APLIC.pacHits = [];
+    if (repintar) repintar();
+    return;
+  }
+
+  APLIC.pacHits = r.pacientes || [];
+  APLIC.pacRecortado = !!r.recortado;
+
+  /* Amarre automático: una sola, y con el nombre idéntico al de la agenda.
+     Si el nombre no es idéntico no se amarra solo aunque haya una sola
+     candidata — «Ana Lopez» contra «Ana Lopez Garcia» puede ser otra
+     persona, y adivinar aquí es exactamente lo que vinimos a quitar. */
+  if (auto && APLIC.pacHits.length === 1 &&
+      plano(APLIC.pacHits[0].nombre) === plano(texto)) {
+    APLIC.pac = APLIC.pacHits[0];
+    APLIC.pacHits = [];
+  }
+  if (repintar) repintar();
+}
+
+function cablearIdentidad(repintar) {
+  if ($('pCambiar')) $('pCambiar').onclick = function () {
+    APLIC.pac = null; APLIC.pacHits = []; APLIC.pacBuscado = false;
+    APLIC.pacQ = String(APLIC.paciente || '');
+    repintar();
+  };
+  if ($('pBuscar')) $('pBuscar').onclick = function () {
+    buscarIdentidad($('pBusca').value, false, repintar);
+  };
+  if ($('pBusca')) $('pBusca').onkeydown = function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); buscarIdentidad(this.value, false, repintar); }
+  };
+  Array.prototype.forEach.call(document.querySelectorAll('[data-pac]'), function (b) {
+    b.onclick = function () {
+      var id = this.getAttribute('data-pac');
+      (APLIC.pacHits || []).forEach(function (x) { if (String(x.id) === id) APLIC.pac = x; });
+      /* El nombre que se guarda es el de la base, no el de la agenda: es el
+         que está en el expediente, y es el que hay que poder leer después. */
+      if (APLIC.pac && APLIC.pac.nombre) APLIC.paciente = APLIC.pac.nombre;
+      APLIC.pacHits = [];
+      repintar();
+    };
+  });
+}
+
+/* ---------------- cabina o quirófano ---------------- */
+
+function tarjetaEntorno() {
+  if (!APLIC.cita_id && !APLIC.sinCita) return '';
+  var e = APLIC.entorno || '';
+  return '<div class="card"><h3>¿Dónde se aplicó?</h3>' +
+    '<p class="mini">De esto depende en qué expediente tiene que estar la nota. ' +
+    'Si la sesión fue con sedación es quirófano, aunque el material haya salido ' +
+    'de la misma cabina.</p>' +
+    '<div class="rejilla">' +
+    Object.keys(ENTORNO_TEXTO).map(function (k) {
+      return '<button class="' + (e === k ? 'b-dark' : 'b-ghost') + '" data-ent="' + k + '">' +
+        ENTORNO_TEXTO[k][0] + '</button>';
+    }).join('') + '</div>' +
+    (e ? '<p class="mini">' + ENTORNO_TEXTO[e][1] + '</p>' : '') + '</div>';
+}
+
+function cablearEntorno(repintar) {
+  Array.prototype.forEach.call(document.querySelectorAll('[data-ent]'), function (b) {
+    b.onclick = function () {
+      APLIC.entorno = this.getAttribute('data-ent');
+      repintar();
+    };
+  });
+}
 
 function tarjetaJustificacion() {
   var j = APLIC.just || (APLIC.just = {});
@@ -1201,6 +1398,7 @@ function faltaParaAplicar() {
   var j = APLIC.just || {};
   if (!APLIC.cita_id && !APLIC.sinCita) return 'Falta escoger la cita.';
   if (APLIC.sinCita && !String(APLIC.paciente || '').trim()) return 'Falta el nombre de la paciente.';
+  if (!APLIC.entorno) return 'Falta decir si fue en cabina o en quirófano.';
   if (!APLIC.lineas.length) return 'No has puesto nada.';
   if (!j.tipo) return 'Falta decir por qué sale del almacén.';
   if ((j.tipo === 'FOLIO' || j.tipo === 'PAQUETE') && !String(j.folio_cobro || '').trim()) {
@@ -2162,6 +2360,8 @@ function pintarAplicar(busca) {
     '</p></div>' +
 
     tarjetaCita() +
+    tarjetaIdentidad() +
+    tarjetaEntorno() +
 
     (APLIC.lineas.length
       ? '<div class="card"><h3>' + APLIC.lineas.length + ' renglón(es) · ' +
@@ -2217,6 +2417,8 @@ function pintarAplicar(busca) {
 
   var repintar = function () { pintarAplicar($('aBusca') ? $('aBusca').value : ''); };
   cablearCita(repintar);
+  cablearIdentidad(repintar);
+  cablearEntorno(repintar);
   cablearJustificacion(repintar);
   actualizarFalta();
 
@@ -2226,7 +2428,14 @@ function pintarAplicar(busca) {
     if ($('aNota')) APLIC.nota = $('aNota').value;
     if (APLIC.recordarJ) APLIC.recordarJ();
   }
-  if ($('aPac')) $('aPac').oninput = function () { recordar(); actualizarFalta(); };
+  /* El nombre tecleado se refleja en el buscador de la base SIN repintar.
+     Repintar al salir del campo -que es lo que hacía esto antes- le tiraba
+     el renglón puesto a quien estaba capturando: el arreglo no puede
+     costarle trabajo a quien aplica. */
+  if ($('aPac')) $('aPac').oninput = function () {
+    recordar(); actualizarFalta();
+    if ($('pBusca') && APLIC.pacQ === undefined) $('pBusca').value = this.value;
+  };
   if ($('aNota')) $('aNota').oninput = recordar;
 
   /* Cambiar de almacén tira los renglones puestos: son lotes del otro
@@ -2309,6 +2518,11 @@ async function guardarAplicacion() {
   try {
     r = await enviar({ accion: 'aplicacion_guardar', ubic_id: APLIC.ubic_id,
       paciente: APLIC.paciente, nota: APLIC.nota,
+      /* Las dos llaves de la paciente y dónde se aplicó. Si no se pudo
+         identificar van vacías y el backend guarda por nombre, como antes. */
+      paciente_id: (APLIC.pac && APLIC.pac.id) || '',
+      paciente_folio: (APLIC.pac && APLIC.pac.folio) || '',
+      entorno: APLIC.entorno || '',
       cita_id: APLIC.cita_id || '',
       /* El tratamiento se copia de la cita y se guarda con el movimiento:
          es lo que después permite saber cuánto material cuesta un Botox sin
@@ -2344,9 +2558,15 @@ async function guardarAplicacion() {
             esc((JUST_TEXTO[r.justificacion.tipo] || [r.justificacion.tipo])[0].toLowerCase()) +
             '.</div>'
           : '')) +
+    (r.duplicado || r.paciente_id ? '' :
+      '<div class="aviso a-warn">Quedó guardada con el nombre escrito, sin número de ' +
+      'paciente. El cobro y la nota clínica de esta aplicación se van a tener que ' +
+      'amarrar a mano.</div>') +
     (r.duplicado ? '' :
       '<div class="card"><h3>' + esc(r.paciente) + '</h3>' +
-      '<p class="mini mono">' + esc(r.folio) + ' · ' + esc(r.fecha) + '</p>' +
+      '<p class="mini mono">' + esc(r.folio) + ' · ' + esc(r.fecha) +
+        (r.paciente_id ? ' · Nº ' + esc(r.paciente_id) : '') +
+        (r.entorno_nombre ? ' · ' + esc(r.entorno_nombre) : '') + '</p>' +
       r.detalle.map(function (d) {
         return '<div class="fila-lote"><span class="t">' +
           '<span class="n">' + esc(d.nombre) + ' · ' + d.cantidad + ' ' +
