@@ -2954,10 +2954,16 @@ async function guardarComoPlantilla() {
    ¿cada salida de material tiene su nota clínica, y esa nota dice que
    se aplicó?
 
-   La pantalla ordena por lo que falta, no por la hora: lo primero que
-   se ve es lo que hay que resolver. Los cinco estados se ven distintos
-   a propósito, sobre todo «nota sin mención», que es el que un ojo
-   rápido daría por bueno.
+   Desde el 26 nov 2026 se leen los tres expedientes —consultorio,
+   Renasté y Zorvix—, así que un renglón que no encuentra la nota ya es
+   un veredicto y no una laguna. La pantalla cambió en consecuencia: lo
+   que falta se llama faltante, y lo que todavía no se pudo comprobar se
+   sigue llamando por confirmar, separado y en otro color.
+
+   Los dos estados que un ojo rápido daría por buenos van marcados a
+   propósito: «nota sin mención», donde la nota existe y no nombra lo
+   aplicado, y «nota en borrador», donde está escrito pero todavía no
+   forma parte del expediente.
    ================================================================= */
 
 var CRUCE = { periodo: 'dia', fecha: '' };
@@ -2967,14 +2973,14 @@ async function pantallaCruce(periodo, fecha) {
   CRUCE.fecha = fecha || CRUCE.fecha || hoyFront_();
 
   encabezado('Expediente de cada aplicación', 'Que lo aplicado esté en la nota');
-  pintar('<div class="card"><p class="sub">Cruzando contra el expediente…</p></div>');
+  pintar('<div class="card"><p class="sub">Cruzando contra los expedientes…</p></div>');
 
   var r;
   try {
     r = await enviar({ accion: 'cruce_expediente',
                        periodo: CRUCE.periodo, fecha: CRUCE.fecha }, true);
   } catch (e) {
-    return pintar('<div class="aviso a-err">Sin conexión. El cruce lee el expediente ' +
+    return pintar('<div class="aviso a-err">Sin conexión. El cruce lee los expedientes ' +
       'en vivo.</div><button class="b-ghost" onclick="pantallaInicio()">Volver</button>');
   }
   if (!r.ok) return pintar('<div class="aviso a-err">' + esc(r.error) + '</div>' +
@@ -2983,20 +2989,33 @@ async function pantallaCruce(periodo, fecha) {
   var s = r.resumen;
   var ETIQ = {
     DOCUMENTADA:             ['documentada', 'p-ok'],
+    NOTA_EN_BORRADOR:        ['nota en borrador', 'p-warn'],
     NOTA_SIN_MENCION:        ['nota sin mención', 'p-warn'],
-    SIN_NOTA_EN_CONSULTORIO: ['sin nota en consultorio', 'p-warn'],
-    NO_ESTA_EN_CONSULTORIO:  ['no está en consultorio', 'p-warn'],
+    SIN_NOTA_EN_CONSULTORIO: ['sin nota en consultorio', 'p-crit'],
+    SIN_NOTA_EN_SEDE:        ['sin nota en quirófano', 'p-crit'],
+    NO_ESTA_EN_CONSULTORIO:  ['no está en consultorio', 'p-crit'],
+    SIN_LLAVE_EN_SEDE:       ['no está en esa sede', 'p-crit'],
     NO_VERIFICABLE:          ['no verificable', 'p-neutral']
   };
-  var PESO = { NO_ESTA_EN_CONSULTORIO: 0, NOTA_SIN_MENCION: 1,
-               SIN_NOTA_EN_CONSULTORIO: 2, NO_VERIFICABLE: 3, DOCUMENTADA: 4 };
+  /* Peor primero. «Nota sin mención» y «en borrador» van arriba de los
+     faltantes puros a propósito: son los que nadie va a revisar solo. */
+  var PESO = { NOTA_SIN_MENCION: 0, NOTA_EN_BORRADOR: 1,
+               SIN_NOTA_EN_CONSULTORIO: 2, SIN_NOTA_EN_SEDE: 2,
+               NO_ESTA_EN_CONSULTORIO: 3, SIN_LLAVE_EN_SEDE: 3,
+               NO_VERIFICABLE: 4, DOCUMENTADA: 5 };
   var filas = (r.filas || []).slice().sort(function (a, b) {
     if (PESO[a.estado] !== PESO[b.estado]) return PESO[a.estado] - PESO[b.estado];
     return String(a.fecha + a.hora).localeCompare(String(b.fecha + b.hora));
   });
+
   var porConfirmar = s.por_confirmar || 0;
+  /* Lo que de verdad falta: negativos que ya son veredicto. */
+  var faltantes = filas.filter(function (x) {
+    return x.concluyente && x.estado !== 'DOCUMENTADA';
+  }).length;
   var leg = r.expedientes_legibles || {};
-  var faltanOtros = !(leg.RENASTE && leg.ZORVIX);
+  var faltanOtros = !(leg.CONSULTORIO && leg.RENASTE && leg.ZORVIX);
+  var sinEntorno = s.aplicaciones - (s.con_entorno || 0);
 
   pintar(
     '<div class="card">' +
@@ -3011,47 +3030,72 @@ async function pantallaCruce(periodo, fecha) {
     '<p class="mini mono">' + esc(r.periodo.etiqueta) + '</p></div>' +
 
     (r.aviso ? '<div class="aviso a-warn">' + esc(r.aviso) + '</div>' : '') +
+    (r.base_pacientes_ok === false
+      ? '<div class="aviso a-warn">No se pudo leer la base de pacientes, así que en ' +
+        'Renasté y Zorvix hubo que buscar por nombre en vez de por teléfono.</div>'
+      : '') +
 
     '<div class="card"><h3>' + s.aplicaciones + ' aplicación(es)</h3>' +
     (s.aplicaciones === 0
       ? '<p class="mini">No hubo aplicaciones en ese periodo.</p>'
       : '<p class="mini">' +
         '<span class="pill p-ok">' + s.documentadas + ' documentada(s)</span> ' +
-        (porConfirmar ? '<span class="pill p-warn">' + porConfirmar +
+        (faltantes ? '<span class="pill p-crit">' + faltantes + ' sin documentar</span> ' : '') +
+        (porConfirmar ? '<span class="pill p-neutral">' + porConfirmar +
           ' por confirmar</span>' : '') + '</p>' +
-        (porConfirmar
-          ? '<p class="mini">De esas ' + porConfirmar + ': ' +
+        ((faltantes || porConfirmar)
+          ? '<p class="mini">' +
             [s.nota_sin_mencion ? s.nota_sin_mencion + ' con nota que no nombra el inyectable' : '',
-             s.sin_nota ? s.sin_nota + ' sin nota en consultorio' : '',
-             s.sin_expediente ? s.sin_expediente + ' que no están en el consultorio' : '',
+             s.en_borrador ? s.en_borrador + ' con la nota todavía en borrador' : '',
+             s.sin_nota ? s.sin_nota + ' con expediente pero sin nota de ese día' : '',
+             s.sin_expediente ? s.sin_expediente + ' que no están en ese expediente' : '',
              s.no_verificable ? s.no_verificable + ' que no se pudieron comprobar' : ''
             ].filter(function (x) { return x; }).join(' · ') + '.</p>'
           : '')) +
     '</div>' +
 
+    (faltantes
+      ? '<div class="aviso a-err"><b>' + faltantes + ' aplicación(es) no están ' +
+        'documentadas.</b> Se buscó en el expediente que les tocaba y la nota no está, o ' +
+        'está y no nombra el material. La NOM-004 pide que todo acto médico deje nota; ' +
+        'aquí la nota es además lo único que explica a dónde fue ese material.</div>'
+      : (s.aplicaciones && !porConfirmar
+          ? '<div class="aviso a-ok">Todas documentadas.</div>' : '')) +
+
+    (s.en_borrador
+      ? '<div class="aviso a-warn"><b>' + s.en_borrador + ' con la nota en borrador.</b> ' +
+        'Lo aplicado sí está escrito, pero mientras la nota no se guarde no forma parte ' +
+        'del expediente. Son las más baratas de cerrar: ya sólo falta guardarlas.</div>'
+      : '') +
+
     (porConfirmar && faltanOtros
-      ? '<div class="aviso a-warn"><b>«Por confirmar» no quiere decir que falte.</b> ' +
-        'Hoy sólo se puede leer el expediente del consultorio. Una sesión de ' +
-        'inyectables <b>con sedación</b> se hace en quirófano y su nota vive en el ' +
-        'expediente de Renasté, aunque el material haya salido de la misma cabina — ' +
-        'y el almacén no registra si hubo sedación, así que desde aquí no se puede ' +
-        'saber cuál le tocaba. Para cerrar estos renglones hacen falta los ' +
-        'expedientes de Renasté y Zorvix en lectura.</div>'
-      : (porConfirmar
-        ? '<div class="aviso a-err"><b>' + porConfirmar + ' aplicación(es) no están ' +
-          'documentadas en ningún expediente.</b> La NOM-004 pide que todo acto médico ' +
-          'deje nota; aquí la nota es además lo único que explica a dónde fue ese ' +
-          'material.</div>'
-        : (s.aplicaciones ? '<div class="aviso a-ok">Todas documentadas.</div>' : ''))) +
+      ? '<div class="aviso a-warn">Hay ' + porConfirmar + ' que no se pudieron comprobar ' +
+        'porque falta algún expediente por leer.</div>'
+      : '') +
+
+    (sinEntorno
+      ? '<div class="aviso a-info">' + sinEntorno + ' de estas aplicaciones no dicen si ' +
+        'fueron en cabina o en quirófano —son anteriores a que la app lo preguntara—, así ' +
+        'que de esas se revisaron <b>los dos</b> expedientes.</div>'
+      : '') +
 
     (filas.length
       ? '<div class="card"><h3>Una por una</h3>' +
         filas.map(function (x) {
           var e = ETIQ[x.estado] || [x.estado, 'p-neutral'];
+          var dondeTxt = (x.revisados || []).map(function (d) {
+            return d === 'CONSULTORIO' ? 'consultorio'
+                 : d.charAt(0) + d.slice(1).toLowerCase();
+          }).join(' y ');
           return '<div class="fila-lote"><span class="t">' +
             '<span class="n">' + esc(x.paciente || '(sin paciente)') + '</span>' +
             '<span class="c">' + esc(x.fecha) + ' ' + esc(x.hora) + ' · ' + esc(x.folio) +
               ' · ' + esc(x.productos.join(', ')) +
+              (dondeTxt ? '<br>Se buscó en: ' + esc(dondeTxt) : '') +
+              (x.paciente_sede
+                ? ' · ' + esc(x.paciente_sede) +
+                  (x.por_telefono ? ' (por teléfono)' : ' (por nombre)')
+                : '') +
               '<br>' + esc(x.detalle) + '</span></span>' +
             '<span class="pill ' + e[1] + '">' + esc(e[0]) + '</span>' +
             (x.concluyente || x.estado === 'DOCUMENTADA' ? ''
