@@ -2762,19 +2762,21 @@ async function pantallaCruce(periodo, fecha) {
 
   var s = r.resumen;
   var ETIQ = {
-    DOCUMENTADA:      ['documentada', 'p-ok'],
-    NOTA_SIN_MENCION: ['nota sin mención', 'p-crit'],
-    SIN_NOTA:         ['sin nota', 'p-crit'],
-    SIN_EXPEDIENTE:   ['sin expediente', 'p-crit'],
-    NO_VERIFICABLE:   ['no verificable', 'p-neutral']
+    DOCUMENTADA:             ['documentada', 'p-ok'],
+    NOTA_SIN_MENCION:        ['nota sin mención', 'p-warn'],
+    SIN_NOTA_EN_CONSULTORIO: ['sin nota en consultorio', 'p-warn'],
+    NO_ESTA_EN_CONSULTORIO:  ['no está en consultorio', 'p-warn'],
+    NO_VERIFICABLE:          ['no verificable', 'p-neutral']
   };
-  var PESO = { SIN_EXPEDIENTE: 0, NOTA_SIN_MENCION: 1, SIN_NOTA: 2,
-               NO_VERIFICABLE: 3, DOCUMENTADA: 4 };
+  var PESO = { NO_ESTA_EN_CONSULTORIO: 0, NOTA_SIN_MENCION: 1,
+               SIN_NOTA_EN_CONSULTORIO: 2, NO_VERIFICABLE: 3, DOCUMENTADA: 4 };
   var filas = (r.filas || []).slice().sort(function (a, b) {
     if (PESO[a.estado] !== PESO[b.estado]) return PESO[a.estado] - PESO[b.estado];
     return String(a.fecha + a.hora).localeCompare(String(b.fecha + b.hora));
   });
-  var faltan = s.nota_sin_mencion + s.sin_nota + s.sin_expediente;
+  var porConfirmar = s.por_confirmar || 0;
+  var leg = r.expedientes_legibles || {};
+  var faltanOtros = !(leg.RENASTE && leg.ZORVIX);
 
   pintar(
     '<div class="card">' +
@@ -2795,27 +2797,32 @@ async function pantallaCruce(periodo, fecha) {
       ? '<p class="mini">No hubo aplicaciones en ese periodo.</p>'
       : '<p class="mini">' +
         '<span class="pill p-ok">' + s.documentadas + ' documentada(s)</span> ' +
-        (s.nota_sin_mencion ? '<span class="pill p-crit">' + s.nota_sin_mencion +
-          ' nota sin mención</span> ' : '') +
-        (s.sin_nota ? '<span class="pill p-crit">' + s.sin_nota + ' sin nota</span> ' : '') +
-        (s.sin_expediente ? '<span class="pill p-crit">' + s.sin_expediente +
-          ' sin expediente</span> ' : '') +
-        (s.no_verificable ? '<span class="pill p-neutral">' + s.no_verificable +
-          ' no verificable</span>' : '') + '</p>') +
+        (porConfirmar ? '<span class="pill p-warn">' + porConfirmar +
+          ' por confirmar</span>' : '') + '</p>' +
+        (porConfirmar
+          ? '<p class="mini">De esas ' + porConfirmar + ': ' +
+            [s.nota_sin_mencion ? s.nota_sin_mencion + ' con nota que no nombra el inyectable' : '',
+             s.sin_nota ? s.sin_nota + ' sin nota en consultorio' : '',
+             s.sin_expediente ? s.sin_expediente + ' que no están en el consultorio' : '',
+             s.no_verificable ? s.no_verificable + ' que no se pudieron comprobar' : ''
+            ].filter(function (x) { return x; }).join(' · ') + '.</p>'
+          : '')) +
     '</div>' +
 
-    (faltan
-      ? '<div class="aviso a-err"><b>' + faltan + ' aplicación(es) no están documentadas.</b> ' +
-        'Salió material y el expediente no lo registra. La NOM-004 pide que todo acto ' +
-        'médico deje nota; aquí la nota es además lo único que explica a dónde fue ' +
-        'ese material.</div>'
-      : (s.aplicaciones ? '<div class="aviso a-ok">Todas documentadas.</div>' : '')) +
-
-    (s.no_verificable
-      ? '<div class="aviso a-info">«No verificable» no quiere decir que falte: quiere ' +
-        'decir que no se pudo comprobar. Casi siempre es una aplicación de quirófano, ' +
-        'cuyo expediente vive en otra cuenta que todavía no se lee desde aquí.</div>'
-      : '') +
+    (porConfirmar && faltanOtros
+      ? '<div class="aviso a-warn"><b>«Por confirmar» no quiere decir que falte.</b> ' +
+        'Hoy sólo se puede leer el expediente del consultorio. Una sesión de ' +
+        'inyectables <b>con sedación</b> se hace en quirófano y su nota vive en el ' +
+        'expediente de Renasté, aunque el material haya salido de la misma cabina — ' +
+        'y el almacén no registra si hubo sedación, así que desde aquí no se puede ' +
+        'saber cuál le tocaba. Para cerrar estos renglones hacen falta los ' +
+        'expedientes de Renasté y Zorvix en lectura.</div>'
+      : (porConfirmar
+        ? '<div class="aviso a-err"><b>' + porConfirmar + ' aplicación(es) no están ' +
+          'documentadas en ningún expediente.</b> La NOM-004 pide que todo acto médico ' +
+          'deje nota; aquí la nota es además lo único que explica a dónde fue ese ' +
+          'material.</div>'
+        : (s.aplicaciones ? '<div class="aviso a-ok">Todas documentadas.</div>' : ''))) +
 
     (filas.length
       ? '<div class="card"><h3>Una por una</h3>' +
@@ -2826,7 +2833,9 @@ async function pantallaCruce(periodo, fecha) {
             '<span class="c">' + esc(x.fecha) + ' ' + esc(x.hora) + ' · ' + esc(x.folio) +
               ' · ' + esc(x.productos.join(', ')) +
               '<br>' + esc(x.detalle) + '</span></span>' +
-            '<span class="pill ' + e[1] + '">' + esc(e[0]) + '</span></div>';
+            '<span class="pill ' + e[1] + '">' + esc(e[0]) + '</span>' +
+            (x.concluyente || x.estado === 'DOCUMENTADA' ? ''
+              : '<span class="pill p-neutral">por confirmar</span>') + '</div>';
         }).join('') + '</div>'
       : '') +
 
