@@ -1212,6 +1212,45 @@ function faltaParaAplicar() {
 
 /* ---------------- el tablero de cuadre ---------------- */
 
+/* Cierra de un golpe las pendientes que traen propuesta inequívoca.
+   Nunca manda las de «revisar»: ésas son justo las que necesitan a alguien
+   decidiendo, y meterlas aquí convertiría el botón en una forma elegante
+   de justificar mal catorce cosas a la vez. */
+async function cerrarLoteCuadre(r, dia) {
+  var listas = (r.sin_justificar || []).filter(function (a) {
+    return a.confianza === 'ALTA' && a.sugerencia;
+  });
+  if (!listas.length) return alertar('No hay ninguna con propuesta clara.');
+
+  var texto = listas.map(function (a) {
+    return '· ' + (a.paciente || '(sin paciente)') + ' → ' + a.sugerencia.folio_cobro;
+  }).join('\n');
+  if (!confirm('Se van a justificar ' + listas.length + ' aplicación(es):\n\n' + texto +
+               '\n\nQueda registrado a su nombre. ¿Seguimos?')) return;
+
+  $('kLote').disabled = true;
+  $('kLote').textContent = 'Justificando…';
+  try {
+    var res = await enviar({ accion: 'justificar_lote',
+      filas: listas.map(function (a) {
+        return { folio: a.folio, tipo: a.sugerencia.tipo,
+                 folio_cobro: a.sugerencia.folio_cobro,
+                 nota: 'Propuesta por el sistema y aceptada en lote',
+                 client_id: idCliente() + '-' + a.folio };
+      }) }, true);
+    if (!res.ok) { $('kLote').disabled = false; return alertar(res.error); }
+    alertar(res.mensaje);
+    if ((res.fallidas || []).length) {
+      alertar(res.fallidas.map(function (f) { return f.folio + ': ' + f.error; }).join(' · '));
+    }
+    pantallaCuadre(dia);
+  } catch (e) {
+    $('kLote').disabled = false;
+    $('kLote').textContent = 'Justificar las que están claras';
+    alertar('Sin conexión. No se justificó nada.');
+  }
+}
+
 async function pantallaCuadre(fecha) {
   var dia = fecha || hoyFront_();
   encabezado('Cuadre del día', 'Paciente y cobro detrás de cada salida');
@@ -1259,13 +1298,29 @@ async function pantallaCuadre(fecha) {
 
     (limpio ? '<div class="aviso a-ok">Todo cuadra este día.</div>' : '') +
 
+    (s.sugeridas
+      ? '<div class="card"><h3>' + s.sugeridas + ' se pueden cerrar de un clic</h3>' +
+        '<p class="mini">De cada una hay <b>un solo cobro</b> de esa paciente ese día, ' +
+        'sin usar por otra aplicación. Revise la lista de abajo antes de aceptarlas: ' +
+        'la app propone, usted es quien declara que eso se cobró así.</p>' +
+        '<button class="b-primary" id="kLote">Justificar las ' + s.sugeridas +
+        ' que están claras</button></div>'
+      : '') +
+
     bloque('Salidas sin justificar',
       'Salió material y nadie dijo por qué. Es el hueco que hay que cerrar.',
       r.sin_justificar, function (a) {
+        var pr = a.sugerencia;
         return '<div class="fila-lote"><span class="t">' +
           '<span class="n">' + esc(a.paciente || '(sin paciente)') + ' · ' + a.piezas + ' pieza(s)</span>' +
           '<span class="c">' + esc(a.folio) + ' · ' + esc(a.hora) + ' · ' + esc(a.ubic_nombre) +
-            (a.problema ? ' · ' + esc(a.problema) : '') + '</span></span>' +
+            (a.problema ? ' · ' + esc(a.problema) : '') +
+            (pr ? ' · propone <b>' + esc(pr.folio_cobro) + '</b>' : '') +
+            (a.sugerencia_nota && !pr ? ' · ' + esc(a.sugerencia_nota) : '') +
+            '</span></span>' +
+          (a.confianza === 'ALTA' ? '<span class="pill p-ok">clara</span>'
+           : a.confianza === 'NINGUNA' ? '<span class="pill p-neutral">sin cobro</span>'
+           : '<span class="pill p-warn">revisar</span>') +
           '<button class="b-dark" data-just-folio="' + esc(a.folio) +
             '" style="width:auto;margin:0">Justificar</button></div>';
       }) +
@@ -1326,6 +1381,7 @@ async function pantallaCuadre(fecha) {
 
     '<button class="b-ghost" onclick="pantallaInicio()">Volver</button>');
 
+  if ($('kLote')) $('kLote').onclick = function () { cerrarLoteCuadre(r, dia); };
   $('kFecha').onchange = function () { pantallaCuadre(this.value); };
   $('kAyer').onclick = function () { pantallaCuadre(diaMas_(dia, -1)); };
   $('kManana').onclick = function () { pantallaCuadre(diaMas_(dia, 1)); };
@@ -2361,6 +2417,316 @@ async function pantallaEscaner() {
   });
 }
 
+/* =================================================================
+   Cotizar material
+
+   Armar una lista desde cero y preguntar cuánto cuesta el material. Para
+   los casos que no tienen plantilla: alguien de recepción manda la lista
+   de una resección de pólipo y hay que contestarle con un número.
+
+   Dos cosas que la pantalla repite a propósito, porque son las que se
+   malinterpretan:
+
+     · Esto NO mueve inventario. No abre caja, no aparta nada.
+     · El total es un PISO cuando hay renglones sin precio. La pantalla
+       dice cuántos quedaron fuera en vez de completarlos con ceros.
+   ================================================================= */
+
+var COTIZA = { nombre: '', filas: [], r: null, busca: '' };
+
+function pantallaCotizar() {
+  encabezado('Cotizar material', 'Qué cuesta una lista de insumos');
+  COTIZA.r = null;
+  pintarCotizar();
+}
+
+function catalogoCotizable_() {
+  return ((estado.cat || {}).catalogo || []).filter(function (c) {
+    return String(c.activo || 'SI').toUpperCase() !== 'NO';
+  });
+}
+
+function pintarCotizar() {
+  var q = plano(COTIZA.busca || '');
+  var puestos = {};
+  COTIZA.filas.forEach(function (f) { puestos[f.sku] = true; });
+
+  var hallados = !q ? [] : catalogoCotizable_().filter(function (c) {
+    if (puestos[String(c.sku).toUpperCase()]) return false;
+    return plano(c.sku + ' ' + (c.nombre || '') + ' ' + (c.presentacion || '')).indexOf(q) >= 0;
+  }).slice(0, 12);
+
+  pintar(
+    '<div class="card">' +
+    '<div class="campo"><label>De qué es la cotización</label>' +
+    '<input id="cNombre" autocomplete="off" placeholder="Ej. Resección de pólipo" value="' +
+      esc(COTIZA.nombre || '') + '"></div>' +
+    '<p class="mini">Esto <b>no mueve inventario</b>: no abre caja ni aparta material. ' +
+    'Es una pregunta sobre precios, no una salida.</p></div>' +
+
+    '<div class="card"><h3>Agregar insumos</h3>' +
+    '<div class="buscador">' +
+    '<input id="cBusca" placeholder="Busca por nombre o clave…" autocomplete="off" value="' +
+      esc(COTIZA.busca || '') + '">' +
+    '<button class="b-dark" id="cEscan">Escanear</button></div>' +
+    (q && !hallados.length
+      ? '<p class="mini">Nada con eso' + (Object.keys(puestos).length ? ' que no esté ya en la lista' : '') + '.</p>'
+      : hallados.map(function (c) {
+          return '<div class="fila-lote"><span class="t">' +
+            '<span class="n">' + esc(c.nombre || c.sku) + '</span>' +
+            '<span class="c">' + esc(c.sku) +
+              (c.presentacion ? ' · ' + esc(c.presentacion) : '') +
+              ' · ' + esc(plural(c.unidad_base || 'pieza')) + '</span></span>' +
+            (String(c.controlado || '').toUpperCase() === 'SI'
+              ? '<span class="pill p-crit">controlado</span>' : '') +
+            '<button class="b-dark cAdd" data-sku="' + esc(c.sku) + '" ' +
+              'style="width:auto;padding:8px 14px;margin:0">Agregar</button></div>';
+        }).join('')) +
+    '</div>' +
+
+    (COTIZA.filas.length
+      ? '<div class="card"><h3>' + COTIZA.filas.length + ' renglón(es)</h3>' +
+        COTIZA.filas.map(function (f, i) {
+          return '<div class="fila-lote"><span class="t">' +
+            '<span class="n">' + esc(f.nombre) + '</span>' +
+            '<span class="c">' + esc(f.sku) + ' · ' + esc(plural(f.unidad)) + '</span></span>' +
+            '<input class="cQ" data-i="' + i + '" type="number" inputmode="decimal" min="0" ' +
+              'step="any" style="width:5.5em;margin:0" value="' + esc(String(f.cantidad)) + '">' +
+            '<button class="b-ghost cDel" data-i="' + i + '" ' +
+              'style="width:auto;padding:8px 12px;margin:0">Quitar</button></div>';
+        }).join('') +
+        '<button class="b-primary" id="cCalc">Calcular el costo</button>' +
+        '<button class="b-ghost" id="cLimpiar">Vaciar la lista</button></div>'
+      : '<div class="aviso a-info">Busque arriba y vaya agregando lo que lleva el caso.</div>') +
+
+    (COTIZA.r ? bloqueCotizacion(COTIZA.r) : '') +
+
+    '<button class="b-ghost" onclick="pantallaInicio()">Volver</button>');
+
+  $('cNombre').oninput = function () { COTIZA.nombre = this.value; };
+  /* El QR de la etiqueta trae el folio del LOTE, no la clave. Se resuelve
+     contra el lote y se agrega la clave de ese lote, que es lo que la
+     persona tiene en la mano frente al anaquel. */
+  $('cEscan').onclick = function () {
+    leerCodigo({
+      titulo: 'Escanear para cotizar',
+      nota: 'Apunta al código de la etiqueta',
+      alLeer: agregarEscaneadoACotizacion,
+      alTeclear: function () { pantallaCotizar(); },
+      alCancelar: function () { pantallaCotizar(); }
+    });
+  };
+  var b = $('cBusca');
+  b.oninput = function () {
+    COTIZA.busca = this.value;
+    var pos = this.selectionStart;
+    pintarCotizar();
+    var n = $('cBusca'); n.focus(); try { n.setSelectionRange(pos, pos); } catch (e) {}
+  };
+
+  Array.prototype.forEach.call(document.querySelectorAll('.cAdd'), function (el) {
+    el.onclick = function () {
+      var sku = String(this.getAttribute('data-sku')).toUpperCase();
+      var c = null;
+      catalogoCotizable_().forEach(function (x) {
+        if (String(x.sku).toUpperCase() === sku) c = x;
+      });
+      if (!c) return;
+      COTIZA.filas.push({ sku: sku, nombre: c.nombre || sku,
+                          unidad: c.unidad_base || 'pieza', cantidad: 1 });
+      COTIZA.busca = '';
+      COTIZA.r = null;
+      pintarCotizar();
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('.cQ'), function (el) {
+    el.onchange = function () {
+      var i = Number(this.getAttribute('data-i'));
+      COTIZA.filas[i].cantidad = Number(this.value || 0);
+      COTIZA.r = null;
+    };
+  });
+  Array.prototype.forEach.call(document.querySelectorAll('.cDel'), function (el) {
+    el.onclick = function () {
+      COTIZA.filas.splice(Number(this.getAttribute('data-i')), 1);
+      COTIZA.r = null;
+      pintarCotizar();
+    };
+  });
+  if ($('cLimpiar')) $('cLimpiar').onclick = function () {
+    COTIZA.filas = []; COTIZA.r = null; pintarCotizar();
+  };
+  if ($('cCalc')) $('cCalc').onclick = calcularCotizacion;
+  if ($('cPlantilla')) $('cPlantilla').onclick = guardarComoPlantilla;
+  if ($('cCopiar')) $('cCopiar').onclick = copiarCotizacion;
+}
+
+/* El código escaneado puede ser un folio de lote (LOT-…) o la clave misma.
+   En los dos casos lo que entra a la cotización es la CLAVE: se cotiza
+   material, no el frasco que se tenga en la mano. */
+async function agregarEscaneadoACotizacion(txt) {
+  var v = String(txt || '').trim().toUpperCase();
+  pantallaCotizar();
+  if (!v) return;
+
+  var sku = v;
+  if (/^LOT-/.test(v)) {
+    try {
+      var r = await enviar({ accion: 'lote_buscar', q: v }, true);
+      var l = (r.ok && (r.lotes || [])[0]) || null;
+      if (!l) return alertar('No encontré ese folio: ' + v);
+      sku = String(l.sku || '').toUpperCase();
+    } catch (e) {
+      return alertar('Sin conexión: no pude resolver el folio ' + v + '.');
+    }
+  }
+
+  var c = null;
+  catalogoCotizable_().forEach(function (x) {
+    if (String(x.sku).toUpperCase() === sku) c = x;
+  });
+  if (!c) return alertar('Esa clave no está en el catálogo: ' + sku);
+
+  var ya = false;
+  COTIZA.filas.forEach(function (f) {
+    if (f.sku === sku) { f.cantidad = Number(f.cantidad || 0) + 1; ya = true; }
+  });
+  if (!ya) {
+    COTIZA.filas.push({ sku: sku, nombre: c.nombre || sku,
+                        unidad: c.unidad_base || 'pieza', cantidad: 1 });
+  }
+  COTIZA.r = null;
+  pintarCotizar();
+}
+
+async function calcularCotizacion() {
+  var malas = COTIZA.filas.filter(function (f) { return !(Number(f.cantidad) > 0); });
+  if (malas.length) return alertar('Hay renglones sin cantidad. Ponga cuánto lleva de cada uno.');
+
+  $('cCalc').disabled = true;
+  $('cCalc').textContent = 'Calculando…';
+  var r;
+  try {
+    r = await enviar({ accion: 'cotizar_material',
+                       renglones: COTIZA.filas.map(function (f) {
+                         return { sku: f.sku, cantidad: Number(f.cantidad) };
+                       }) }, true);
+  } catch (e) {
+    $('cCalc').disabled = false; $('cCalc').textContent = 'Calcular el costo';
+    return alertar('Sin conexión. Una cotización necesita señal: lee los precios de los lotes.');
+  }
+  if (!r.ok) {
+    $('cCalc').disabled = false; $('cCalc').textContent = 'Calcular el costo';
+    return alertar(r.error);
+  }
+  COTIZA.r = r;
+  pintarCotizar();
+}
+
+function bloqueCotizacion(r) {
+  var t = r.total;
+  return '<div class="card"><h3>' +
+    (r.ve_costo && t.costo !== null ? pesos(t.costo) : t.piezas + ' pieza(s)') +
+    (COTIZA.nombre ? ' · ' + esc(COTIZA.nombre) : '') + '</h3>' +
+
+    (r.ve_costo && t.costo !== null
+      ? '<p class="mini">' + t.renglones + ' renglón(es) · ' + t.piezas + ' pieza(s) · ' +
+        'costeado al ' + t.cobertura + ' %</p>' +
+        (t.costo_estimado > 0
+          ? '<p class="mini"><b>' + pesos(t.costo_existencia) + '</b> de lo que ya está en el ' +
+            'anaquel · <b>' + pesos(t.costo_estimado) + '</b> estimado de lo que habría que ' +
+            'comprar, al último precio conocido.</p>'
+          : '')
+      : '<p class="mini">' + t.renglones + ' renglón(es) · ' + t.piezas + ' pieza(s). ' +
+        'Su cuenta no ve costos: esto le dice qué lleva el caso y si hay existencia.</p>') +
+
+    (t.sin_precio ? '<p class="mini"><span class="pill p-crit">' + t.sin_precio +
+      ' sin precio</span></p>' : '') +
+    (t.sin_existencia ? '<p class="mini"><span class="pill p-warn">' + t.sin_existencia +
+      ' sin existencia suficiente</span></p>' : '') +
+    (t.controlados ? '<p class="mini"><span class="pill p-info">' + t.controlados +
+      ' controlado(s)</span></p>' : '') +
+    '</div>' +
+
+    (r.aviso ? '<div class="aviso a-warn">' + esc(r.aviso) + '</div>' : '') +
+
+    '<div class="card"><h3>Renglón por renglón</h3>' +
+    r.renglones.map(function (x) {
+      return '<div class="fila-lote"><span class="t">' +
+        '<span class="n">' + esc(x.nombre) + '</span>' +
+        '<span class="c">' + x.cantidad + ' ' + esc(plural(x.unidad)) +
+          (r.ve_costo && x.importe !== null ? ' · <b>' + pesos(x.importe) + '</b>' : '') +
+          ' · hay ' + x.hay +
+          (x.aviso ? ' · ' + esc(x.aviso) : '') +
+          '</span></span>' +
+        (x.controlado ? '<span class="pill p-crit">controlado</span>' : '') +
+        (!x.costeado ? '<span class="pill p-crit">sin precio</span>'
+         : x.faltan > 0 ? '<span class="pill p-warn">estimado</span>' : '') +
+        '</div>';
+    }).join('') + '</div>' +
+
+    '<div class="card">' +
+    '<button class="b-dark" id="cCopiar">Copiar el resumen</button>' +
+    '<button class="b-ghost" id="cPlantilla">Guardar esta lista como plantilla</button>' +
+    '<p class="mini">La plantilla sirve para el siguiente caso igual: queda en «Ver ' +
+    'plantillas» y se puede armar desde ahí sin volver a capturarla.</p></div>';
+}
+
+/* El resumen se copia en texto plano a propósito: de aquí se pega a un
+   WhatsApp o a un correo, que es como recepción pide y contesta esto. */
+function copiarCotizacion() {
+  var r = COTIZA.r; if (!r) return;
+  var t = r.total;
+  var l = [];
+  l.push('Material · ' + (COTIZA.nombre || 'cotización'));
+  l.push('');
+  r.renglones.forEach(function (x) {
+    l.push('· ' + x.nombre + ' — ' + x.cantidad + ' ' + plural(x.unidad) +
+      (r.ve_costo && x.importe !== null ? '  ' + pesos(x.importe) : '') +
+      (!x.costeado ? '  (sin precio)' : (x.faltan > 0 ? '  (estimado)' : '')));
+  });
+  l.push('');
+  if (r.ve_costo && t.costo !== null) {
+    l.push('Costo del material: ' + pesos(t.costo));
+    if (t.costo_estimado > 0) {
+      l.push('  ' + pesos(t.costo_existencia) + ' en existencia · ' +
+             pesos(t.costo_estimado) + ' estimado por comprar');
+    }
+    if (t.sin_precio) {
+      l.push('  Ojo: ' + t.sin_precio + ' renglón(es) sin precio capturado quedaron fuera; ' +
+             'el total es un piso.');
+    }
+    l.push('  Es costo de material, no precio al paciente.');
+  }
+  var txt = l.join('\n');
+  try {
+    navigator.clipboard.writeText(txt);
+    alertar('Resumen copiado.');
+  } catch (e) {
+    alertar('No pude copiarlo. Aquí está:\n\n' + txt);
+  }
+}
+
+async function guardarComoPlantilla() {
+  var nombre = String(COTIZA.nombre || '').trim();
+  if (!nombre) return alertar('Póngale nombre a la cotización: ese es el nombre de la plantilla.');
+  if (!confirm('Se va a guardar «' + nombre.toUpperCase() + '» como plantilla con ' +
+               COTIZA.filas.length + ' renglón(es). ¿Seguimos?')) return;
+
+  var filas = COTIZA.filas.map(function (f) {
+    return { plantilla: nombre, item: f.nombre, sku: f.sku,
+             cantidad: Number(f.cantidad), activo: 'SI' };
+  });
+  try {
+    var res = await enviar({ accion: 'plantilla_guardar', filas: filas }, true);
+    if (!res.ok) return alertar(res.error);
+    alertar('Plantilla guardada: ' + res.agregadas + ' renglón(es) nuevos, ' +
+            res.actualizadas + ' actualizado(s).');
+  } catch (e) {
+    alertar('Sin conexión. La plantilla no se guardó.');
+  }
+}
+
 function pantallaInicio() {
   encabezado('Almacén', estado.sesion ? estado.sesion.nombre : '');
   var c = estado.cat || { catalogo: [], almacenes: [] };
@@ -2388,6 +2754,12 @@ function pantallaInicio() {
     (soloAplicacion() ? '' :
       '<button class="baldosa" id="bCajas">Cajas de cirugía<span class="q">Abrir, surtir, cerrar</span></button>' +
       '<button class="baldosa" id="bArmar">¿Se puede armar?<span class="q">Plantilla contra existencia</span></button>') +
+
+    /* Hermana de «¿Se puede armar?»: esa parte de una plantilla, esta parte
+       de cero. Va en la portada de todos -también de inyectables- porque la
+       pregunta «¿cuánto cuesta este material?» no es de quirófano. */
+    '<button class="baldosa" id="bCotizar">Cotizar material' +
+      '<span class="q">Armar una lista y saber qué cuesta</span></button>' +
 
     (aplicaActiva()
       ? '<button class="baldosa fuerte ancha" id="bAplicar">Aplicar a paciente' +
@@ -2478,6 +2850,10 @@ function pantallaInicio() {
   /* Con guarda: estas fichas ya no están en todas las portadas. */
   if ($('bCajas')) $('bCajas').onclick = function () { pantallaCajas(); };
   if ($('bArmar')) $('bArmar').onclick = function () { pantallaSurtido(); };
+  if ($('bCotizar')) $('bCotizar').onclick = function () {
+    COTIZA = { nombre: '', filas: [], r: null, busca: '' };
+    pantallaCotizar();
+  };
   if ($('bAplicar')) $('bAplicar').onclick = function () { pantallaAplicar(); };
   if ($('bAplics')) $('bAplics').onclick = function () { pantallaAplicaciones(); };
   if ($('bCuadre')) $('bCuadre').onclick = function () { pantallaCuadre(); };
