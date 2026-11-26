@@ -2727,6 +2727,117 @@ async function guardarComoPlantilla() {
   }
 }
 
+/* =================================================================
+   Expediente de cada aplicación
+
+   Contesta la pregunta de la NOM antes de que la haga nadie más:
+   ¿cada salida de material tiene su nota clínica, y esa nota dice que
+   se aplicó?
+
+   La pantalla ordena por lo que falta, no por la hora: lo primero que
+   se ve es lo que hay que resolver. Los cinco estados se ven distintos
+   a propósito, sobre todo «nota sin mención», que es el que un ojo
+   rápido daría por bueno.
+   ================================================================= */
+
+var CRUCE = { periodo: 'dia', fecha: '' };
+
+async function pantallaCruce(periodo, fecha) {
+  CRUCE.periodo = periodo || CRUCE.periodo || 'dia';
+  CRUCE.fecha = fecha || CRUCE.fecha || hoyFront_();
+
+  encabezado('Expediente de cada aplicación', 'Que lo aplicado esté en la nota');
+  pintar('<div class="card"><p class="sub">Cruzando contra el expediente…</p></div>');
+
+  var r;
+  try {
+    r = await enviar({ accion: 'cruce_expediente',
+                       periodo: CRUCE.periodo, fecha: CRUCE.fecha }, true);
+  } catch (e) {
+    return pintar('<div class="aviso a-err">Sin conexión. El cruce lee el expediente ' +
+      'en vivo.</div><button class="b-ghost" onclick="pantallaInicio()">Volver</button>');
+  }
+  if (!r.ok) return pintar('<div class="aviso a-err">' + esc(r.error) + '</div>' +
+    '<button class="b-ghost" onclick="pantallaInicio()">Volver</button>');
+
+  var s = r.resumen;
+  var ETIQ = {
+    DOCUMENTADA:      ['documentada', 'p-ok'],
+    NOTA_SIN_MENCION: ['nota sin mención', 'p-crit'],
+    SIN_NOTA:         ['sin nota', 'p-crit'],
+    SIN_EXPEDIENTE:   ['sin expediente', 'p-crit'],
+    NO_VERIFICABLE:   ['no verificable', 'p-neutral']
+  };
+  var PESO = { SIN_EXPEDIENTE: 0, NOTA_SIN_MENCION: 1, SIN_NOTA: 2,
+               NO_VERIFICABLE: 3, DOCUMENTADA: 4 };
+  var filas = (r.filas || []).slice().sort(function (a, b) {
+    if (PESO[a.estado] !== PESO[b.estado]) return PESO[a.estado] - PESO[b.estado];
+    return String(a.fecha + a.hora).localeCompare(String(b.fecha + b.hora));
+  });
+  var faltan = s.nota_sin_mencion + s.sin_nota + s.sin_expediente;
+
+  pintar(
+    '<div class="card">' +
+    '<div class="rejilla">' +
+    ['dia', 'semana', 'mes'].map(function (k) {
+      var t = k === 'dia' ? 'Día' : (k === 'semana' ? 'Semana' : 'Mes');
+      return '<button class="' + (CRUCE.periodo === k ? 'b-dark' : 'b-ghost') +
+        '" data-cper="' + k + '">' + t + '</button>';
+    }).join('') + '</div>' +
+    '<div class="campo"><label>Fecha de referencia</label>' +
+    '<input id="cxFecha" type="date" value="' + esc(CRUCE.fecha) + '"></div>' +
+    '<p class="mini mono">' + esc(r.periodo.etiqueta) + '</p></div>' +
+
+    (r.aviso ? '<div class="aviso a-warn">' + esc(r.aviso) + '</div>' : '') +
+
+    '<div class="card"><h3>' + s.aplicaciones + ' aplicación(es)</h3>' +
+    (s.aplicaciones === 0
+      ? '<p class="mini">No hubo aplicaciones en ese periodo.</p>'
+      : '<p class="mini">' +
+        '<span class="pill p-ok">' + s.documentadas + ' documentada(s)</span> ' +
+        (s.nota_sin_mencion ? '<span class="pill p-crit">' + s.nota_sin_mencion +
+          ' nota sin mención</span> ' : '') +
+        (s.sin_nota ? '<span class="pill p-crit">' + s.sin_nota + ' sin nota</span> ' : '') +
+        (s.sin_expediente ? '<span class="pill p-crit">' + s.sin_expediente +
+          ' sin expediente</span> ' : '') +
+        (s.no_verificable ? '<span class="pill p-neutral">' + s.no_verificable +
+          ' no verificable</span>' : '') + '</p>') +
+    '</div>' +
+
+    (faltan
+      ? '<div class="aviso a-err"><b>' + faltan + ' aplicación(es) no están documentadas.</b> ' +
+        'Salió material y el expediente no lo registra. La NOM-004 pide que todo acto ' +
+        'médico deje nota; aquí la nota es además lo único que explica a dónde fue ' +
+        'ese material.</div>'
+      : (s.aplicaciones ? '<div class="aviso a-ok">Todas documentadas.</div>' : '')) +
+
+    (s.no_verificable
+      ? '<div class="aviso a-info">«No verificable» no quiere decir que falte: quiere ' +
+        'decir que no se pudo comprobar. Casi siempre es una aplicación de quirófano, ' +
+        'cuyo expediente vive en otra cuenta que todavía no se lee desde aquí.</div>'
+      : '') +
+
+    (filas.length
+      ? '<div class="card"><h3>Una por una</h3>' +
+        filas.map(function (x) {
+          var e = ETIQ[x.estado] || [x.estado, 'p-neutral'];
+          return '<div class="fila-lote"><span class="t">' +
+            '<span class="n">' + esc(x.paciente || '(sin paciente)') + '</span>' +
+            '<span class="c">' + esc(x.fecha) + ' ' + esc(x.hora) + ' · ' + esc(x.folio) +
+              ' · ' + esc(x.productos.join(', ')) +
+              '<br>' + esc(x.detalle) + '</span></span>' +
+            '<span class="pill ' + e[1] + '">' + esc(e[0]) + '</span></div>';
+        }).join('') + '</div>'
+      : '') +
+
+    '<button class="b-ghost" onclick="pantallaInicio()">Volver</button>');
+
+  Array.prototype.forEach.call(document.querySelectorAll('[data-cper]'), function (b) {
+    b.onclick = function () { pantallaCruce(this.getAttribute('data-cper'), CRUCE.fecha); };
+  });
+  $('cxFecha').onchange = function () { pantallaCruce(CRUCE.periodo, this.value); };
+}
+
 function pantallaInicio() {
   encabezado('Almacén', estado.sesion ? estado.sesion.nombre : '');
   var c = estado.cat || { catalogo: [], almacenes: [] };
@@ -2768,7 +2879,11 @@ function pantallaInicio() {
         '<button class="baldosa" id="bCuadre">Cuadre del día' +
           '<span class="q">Qué salió sin paciente o sin cobro</span></button>' +
         '<button class="baldosa" id="bReporte">Reporte de aplicaciones' +
-          '<span class="q">Día, semana o mes · y qué cuesta cada tratamiento</span></button>'
+          '<span class="q">Día, semana o mes · y qué cuesta cada tratamiento</span></button>' +
+        (puedeVerCostos()
+          ? '<button class="baldosa" id="bCruce">Expediente de cada aplicación' +
+            '<span class="q">Que lo aplicado esté en la nota</span></button>'
+          : '')
       : '') +
 
     /* La lista de compra ya no se esconde a quien tiene un solo almacén: le
@@ -2858,6 +2973,7 @@ function pantallaInicio() {
   if ($('bAplics')) $('bAplics').onclick = function () { pantallaAplicaciones(); };
   if ($('bCuadre')) $('bCuadre').onclick = function () { pantallaCuadre(); };
   if ($('bReporte')) $('bReporte').onclick = function () { pantallaReporte('dia'); };
+  if ($('bCruce')) $('bCruce').onclick = function () { pantallaCruce('dia'); };
   if ($('bCompra')) $('bCompra').onclick = function () { pantallaCompra(); };
   if ($('bMin')) $('bMin').onclick = function () { pantallaMinimos(); };
   if ($('bMin2')) $('bMin2').onclick = function () { pantallaMinimos(); };
